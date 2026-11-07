@@ -1,0 +1,5 @@
+# Development verification
+
+The root Python scripts and verification/android are optional historical research tools, not required to build the app. They depend on curl.exe on Windows and public network access. Output is written under ignored research/. Do not upload that folder or raw outputs. Read scripts before running: probe_extended.py --write-tests performs real account changes, attempts cleanup and can write progress. Run only with explicit consent for a disposable test account. Without --write-tests it must remain read-only. The native app is the recommended sign-in path; never send a token to a maintainer or agent.
+
+Known device exercises included native account reads, temporary follow/save add-remove, position readback, background/media-card return, cache cold restore, English/Chinese presentation and player/dock interactions. Private response bodies, screenshots, identifiers and logs are intentionally omitted. These are observations, not automated regression guarantees. Short optimized-build scroll samples still exceeded the 8.33ms budget for stable 120Hz; do not advertise perfect frame rate.
