@@ -1,4 +1,6 @@
 package dev.podcast.nativeapp
+import androidx.core.graphics.toColorInt
+import androidx.core.net.toUri
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,9 +13,11 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 
+private val numericId = Regex("\\d+")
+
 data class PodcastItem(val id: String, val type: String, val title: String, val author: String, val artwork: String, val audio: String, val description: String, val duration: Long, val url: String = "")
 data class EditorialSection(val id: String, val title: String, val items: List<PodcastItem>)
-data class BrowseCategory(val id: String, val title: String, val artwork: String, val route: String, val color: Long = 0xFFE9EDF4, val ink: Long = 0xFF111111)
+data class BrowseCategory(val id: String, val title: String, val artwork: String, val route: String, val color: Long = 0xFFE9EDF4)
 fun JSONArray.items(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
 fun JSONObject.item(): PodcastItem {
     val a = optJSONObject("attributes") ?: JSONObject()
@@ -28,9 +32,7 @@ class Api(private val userToken: () -> String?) {
     private var regionCheckedAt = 0L
     private var regionUser: String? = null
     private class HttpFailure(val code: Int) : java.io.IOException(if (code == 403) "登录会话不可用，请重新登录" else "请求失败（$code）")
-    private var bearer = ""
-    var editorialSections = emptyList<EditorialSection>()
-        private set
+    @Volatile private var bearer = ""
     var homeFailures = emptyList<String>()
         private set
     suspend fun home(signedIn: Boolean): List<EditorialSection> = coroutineScope {
@@ -41,7 +43,7 @@ class Api(private val userToken: () -> String?) {
         }
         jobs += async { try { val r = request("/v1/catalog/$storefront/charts?chart=top&genre=26&types=podcasts&limit=12"); val items = r.optJSONObject("results")?.optJSONArray("podcasts")?.items()?.flatMap { it.optJSONArray("data")?.items() ?: emptyList() }?.map { it.item() } ?: emptyList(); EditorialSection("popular","热门节目",items) } catch(e: Exception) { if(e is kotlinx.coroutines.CancellationException) throw e; failures += "热门节目"; null } }
         val basics = jobs.awaitAll().filterNotNull().filter { it.items.isNotEmpty() }
-        val editorial = try { discover(); editorialSections } catch(e: Exception) { if(e is kotlinx.coroutines.CancellationException) throw e; failures += "编辑精选"; emptyList() }
+        val editorial = try { editorial() } catch(e: Exception) { if(e is kotlinx.coroutines.CancellationException) throw e; failures += "编辑精选"; emptyList() }
         homeFailures = failures.toList()
         clearPagination()
         uniqueEditorialSections(basics + editorial)
@@ -69,13 +71,18 @@ class Api(private val userToken: () -> String?) {
         return items
     }
     private fun resultsPage(payload: JSONObject): List<PodcastItem> {
-        val results = payload.optJSONObject("results") ?: return page(payload)
-        val blocks = results.keys().asSequence().flatMap { key ->
+        val blocks = resultBlocks(payload) ?: return page(payload)
+        cursors(blocks.map { it.optString("next") })
+        return resultItems(blocks)
+    }
+    private fun resultBlocks(payload: JSONObject): List<JSONObject>? {
+        val results = payload.optJSONObject("results") ?: return null
+        return results.keys().asSequence().flatMap { key ->
             when(val value = results.opt(key)) { is JSONArray -> value.items().asSequence(); is JSONObject -> sequenceOf(value); else -> emptySequence() }
         }.toList()
-        cursors(blocks.map { it.optString("next") })
-        return blocks.flatMap { it.optJSONArray("data")?.items() ?: emptyList() }.map { it.item() }
     }
+    private fun resultItems(blocks: List<JSONObject>) =
+        blocks.flatMap { it.optJSONArray("data")?.items().orEmpty() }.map { it.item() }
     private fun http(url: String, method: String = "GET", account: Boolean = false, body: JSONObject? = null): String {
         val uri = URI(url)
         require(uri.scheme == "https" && uri.host in setOf("podcasts.apple.com", "amp-api.podcasts.apple.com"))
@@ -93,7 +100,7 @@ class Api(private val userToken: () -> String?) {
             return c.inputStream.bufferedReader().use { it.readText() }
         } finally { c.disconnect() }
     }
-    private fun ensureBearer() {
+    @Synchronized private fun ensureBearer() {
         if (bearer.isNotEmpty()) {
             val expiry = runCatching { JSONObject(String(android.util.Base64.decode(bearer.split('.')[1], android.util.Base64.URL_SAFE))).optLong("exp") }.getOrDefault(0)
             if (expiry > System.currentTimeMillis() / 1000 + 60) return
@@ -127,10 +134,30 @@ class Api(private val userToken: () -> String?) {
         regionUser = user; regionCheckedAt = System.currentTimeMillis()
     }
     suspend fun charts(episodes: Boolean = false, subscribers: Boolean = false, genre: String = "26"): List<PodcastItem> {
+        return resultsPage(chartPayload(episodes, subscribers, genre, 30))
+    }
+    private suspend fun chartPayload(episodes: Boolean, subscribers: Boolean, genre: String, limit: Int): JSONObject {
         val type = if (episodes) "podcast-episodes" else "podcasts"
-        require(genre.matches(Regex("\\d+")))
-        val data = request("/v1/catalog/$storefront/charts?chart=${if(subscribers) "top-subscriber" else "top"}&genre=$genre&types=$type&limit=30")
-        return resultsPage(data)
+        require(genre.matches(numericId))
+        val chart = if (subscribers) "top-subscriber" else "top"
+        return request("/v1/catalog/$storefront/charts?chart=$chart&genre=$genre&types=$type&limit=$limit")
+    }
+
+    suspend fun discovery(): List<EditorialSection> = coroutineScope {
+        val previews = DiscoveryChart.entries.map { chart ->
+            async {
+                // Reading a preview must not change the cursor of an open chart.
+                val items = try {
+                    val payload = chartPayload(chart == DiscoveryChart.Episodes, chart == DiscoveryChart.Subscribers, "26", 6)
+                    resultItems(resultBlocks(payload).orEmpty()).distinctBy { it.type to it.id }.take(6)
+                } catch (e: java.io.IOException) {
+                    emptyList()
+                }
+                EditorialSection(chart.shelfId, chart.title, items)
+            }
+        }
+        val editorial = try { editorial() } catch (e: java.io.IOException) { emptyList() }
+        return@coroutineScope mergeDiscovery(previews.awaitAll(), editorial)
     }
     suspend fun categories(): List<BrowseCategory> = withContext(Dispatchers.Default) {
         val payload = request("/v1/editorial/$storefront/groupings?name=search-landing&platform=web&l=${contentLanguage()}")
@@ -140,7 +167,7 @@ class Api(private val userToken: () -> String?) {
                 val a = value.optJSONObject("attributes")
                 val link = a?.optJSONObject("link")
                 if(link != null && link.optString("label").isNotBlank()) {
-                    val uri = android.net.Uri.parse(link.optString("url"))
+                    val uri = link.optString("url").toUri()
                     val id = uri.getQueryParameter("id") ?: uri.getQueryParameter("fcId")
                     val route = when {
                         uri.path?.contains("top-charts") == true -> "charts:26"
@@ -152,8 +179,8 @@ class Api(private val userToken: () -> String?) {
                     if(route != null) {
                         val art = a.optJSONObject("artwork")?.optString("url")?.replace("{w}","800")?.replace("{h}","200")?.replace("{c}","bb")?.replace("{f}","png") ?: ""
                         val artwork = a.optJSONObject("artwork")
-                        fun color(key: String, fallback: Long) = runCatching { android.graphics.Color.parseColor("#"+artwork?.optString(key)).toLong() and 0xffffffffL }.getOrDefault(fallback)
-                        result[route] = BrowseCategory(value.optString("id"),link.optString("label"),art,route,color("bgColor",0xFFE9EDF4),color("textColor1",0xFF111111))
+                        fun color(key: String, fallback: Long) = runCatching { ("#" + artwork?.optString(key)).toColorInt().toLong() and 0xffffffffL }.getOrDefault(fallback)
+                        result[route] = BrowseCategory(value.optString("id"),link.optString("label"),art,route,color("bgColor",0xFFE9EDF4))
                     }
                 }
                 value.keys().forEach { walk(value.opt(it)) }
@@ -172,7 +199,7 @@ class Api(private val userToken: () -> String?) {
         } }
         withContext(Dispatchers.Default) { walk(payload) }; return found.values.toList()
     }
-    suspend fun discover(): List<PodcastItem> = withContext(Dispatchers.Default) {
+    private suspend fun editorial(): List<EditorialSection> = withContext(Dispatchers.Default) {
         val payload = request("/v1/editorial/$storefront/groupings?platform=web&name=podcasts&include%5Bgroupings%5D=category&l=${contentLanguage()}")
         val found = linkedMapOf<String, PodcastItem>()
         val sections = linkedMapOf<String,EditorialSection>()
@@ -191,8 +218,9 @@ class Api(private val userToken: () -> String?) {
             }
         }
         walk(payload)
-        editorialSections = uniqueEditorialSections(sections.values.toList())
-        return@withContext found.values.toList()
+        uniqueEditorialSections(sections.values.toList()).ifEmpty {
+            if (found.isEmpty()) emptyList() else listOf(EditorialSection("editorial", "编辑精选", found.values.toList()))
+        }
     }
     suspend fun search(term: String): List<PodcastItem> {
         return resultsPage(request("/v1/catalog/$storefront/search?term=${URLEncoder.encode(term,"UTF-8")}&types=podcasts,podcast-episodes&limit=20"))
@@ -201,16 +229,16 @@ class Api(private val userToken: () -> String?) {
     suspend fun episodes(id: String): List<PodcastItem> = page(request("/v1/catalog/$storefront/podcasts/$id?include=episodes").optJSONArray("data")?.optJSONObject(0)?.optJSONObject("relationships")?.optJSONObject("episodes") ?: JSONObject())
     suspend fun episode(id: String): PodcastItem = request("/v1/catalog/$storefront/podcast-episodes/$id").getJSONArray("data").getJSONObject(0).item()
     suspend fun update(item: PodcastItem, add: Boolean) {
-        require(item.id.matches(Regex("\\d+")))
+        require(item.id.matches(numericId))
         val kind = if (item.type == "podcasts") "podcasts" else "podcast-episodes"
         request("/v1/me/library/$kind/${item.id}", true, if (add) "POST" else "DELETE")
     }
     suspend fun playbackPosition(id: String): JSONObject? {
-        require(id.matches(Regex("\\d+")))
+        require(id.matches(numericId))
         return request("/v1/me/playback/positions/podcast-episodes?ids=$id", true).optJSONArray("data")?.items()?.firstOrNull { it.optString("id") == id }?.optJSONObject("attributes")
     }
     suspend fun savePosition(id: String, position: Long, completed: Boolean, timestamp: String) {
-        require(id.matches(Regex("\\d+")))
+        require(id.matches(numericId))
         request("/v1/me/playback/positions/podcast-episodes/$id", true, "PUT", JSONObject().put("type","playback-positions").put("attributes", JSONObject().put("positionInMilliseconds",position).put("completed",completed).put("recordedAtTimestamp",timestamp)))
     }
 }

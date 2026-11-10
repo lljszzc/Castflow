@@ -18,8 +18,9 @@ import coil.compose.AsyncImage
 @Composable fun EpisodeDetails(initial: PodcastItem, api: Api, onDismiss: () -> Unit, onPlay: (PodcastItem) -> Unit,
     onSave: (PodcastItem) -> Unit, onQueue: (PodcastItem) -> Unit, onDownload: (PodcastItem) -> Unit, onMark: (PodcastItem, Boolean) -> Unit) {
     var item by remember(initial.id) { mutableStateOf(initial) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(initial.id) { try { item = api.episode(initial.id) } catch(e: Exception) { error = "详细介绍暂时无法加载" } }
+    var error by remember(initial.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(initial.id) { try { val details = api.episode(initial.id)
+        item = if (initial.audio.startsWith("content://")) details.copy(audio = initial.audio) else details } catch(e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = "详细介绍暂时无法加载" } }
     val colors = rememberArtworkColors(item.artwork)
     val context = LocalContext.current
     SoftSheet(onDismissRequest = onDismiss, containerColor = colors.background, contentColor = colors.foreground) {
@@ -36,7 +37,7 @@ import coil.compose.AsyncImage
                 context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"${item.title}\n$url"),"分享单集"))
             }) { LocalizedText("分享",color = colors.foreground) }
             error?.let { LocalizedText(it) }
-            androidx.compose.material3.Text(android.text.Html.fromHtml(item.description,0).toString(),fontSize = 16.sp)
+            androidx.compose.material3.Text(remember(item.description) { android.text.Html.fromHtml(item.description,0).toString() },fontSize = 16.sp)
         }
     }
 }

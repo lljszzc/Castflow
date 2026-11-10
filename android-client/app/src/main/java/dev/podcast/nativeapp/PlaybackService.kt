@@ -1,4 +1,7 @@
 package dev.podcast.nativeapp
+import androidx.core.net.toUri
+
+import androidx.core.content.edit
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -25,15 +28,20 @@ class PlaybackService : MediaSessionService() {
     private val progress by lazy { ProgressStore(this) }
     private fun userToken() = CookieManager.getInstance().getCookie("https://podcasts.apple.com")?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("media-user-token=") }?.substringAfter('=')
     private val api by lazy { Api(::userToken) }
-    private fun saveQueue() {
+    private fun saveQueue(includeItems: Boolean = false) {
         val p = session?.player ?: return
-        val items = JSONArray()
-        for(i in 0 until p.mediaItemCount) {
-            val media = p.getMediaItemAt(i)
-            val uri = media.localConfiguration?.uri ?: continue
-            items.put(JSONObject().put("id",media.mediaId).put("uri",uri.toString()).put("title",media.mediaMetadata.title).put("author",media.mediaMetadata.artist).put("artwork",media.mediaMetadata.artworkUri?.toString()))
+        getSharedPreferences("playback-queue", MODE_PRIVATE).edit {
+            if (includeItems) {
+                val items = JSONArray()
+                for(i in 0 until p.mediaItemCount) {
+                    val media = p.getMediaItemAt(i)
+                    val uri = media.localConfiguration?.uri ?: continue
+                    items.put(JSONObject().put("id",media.mediaId).put("uri",uri.toString()).put("title",media.mediaMetadata.title).put("author",media.mediaMetadata.artist).put("artwork",media.mediaMetadata.artworkUri?.toString()))
+                }
+                putString("items", items.toString())
+            }
+            putInt("index",p.currentMediaItemIndex.coerceAtLeast(0)).putLong("position",p.currentPosition.coerceAtLeast(0))
         }
-        getSharedPreferences("playback-queue",MODE_PRIVATE).edit().putString("items",items.toString()).putInt("index",p.currentMediaItemIndex.coerceAtLeast(0)).putLong("position",p.currentPosition.coerceAtLeast(0)).apply()
     }
     private fun checkpoint() {
         saveQueue()
@@ -43,7 +51,7 @@ class PlaybackService : MediaSessionService() {
         val value = progress.record(id, player.currentPosition, player.playbackState == Player.STATE_ENDED)
         if(userToken() != null) syncScope.launch { syncLock.withLock { runCatching { progress.sync(id,value,api) } } }
     }
-    private val tick = object : Runnable { override fun run() { if(session?.player?.isPlaying == true) checkpoint(); handler.postDelayed(this,15000) } }
+    private val tick = object : Runnable { override fun run() { if (session?.player?.isPlaying == true) { checkpoint(); handler.postDelayed(this, 15_000L) } } }
     override fun onCreate() {
         super.onCreate()
         active = this
@@ -62,16 +70,22 @@ class PlaybackService : MediaSessionService() {
         runCatching {
             val prefs = getSharedPreferences("playback-queue",MODE_PRIVATE)
             val restored = JSONArray(prefs.getString("items","[]")).items().map { item ->
-                MediaItem.Builder().setMediaId(item.getString("id")).setUri(item.getString("uri")).setMediaMetadata(MediaMetadata.Builder().setTitle(item.optString("title")).setArtist(item.optString("author")).setArtworkUri(android.net.Uri.parse(item.optString("artwork"))).build()).build()
+                MediaItem.Builder().setMediaId(item.getString("id")).setUri(item.getString("uri")).setMediaMetadata(MediaMetadata.Builder().setTitle(item.optString("title")).setArtist(item.optString("author")).setArtworkUri(item.optString("artwork").toUri()).build()).build()
             }
             if(restored.isNotEmpty()) { player.setMediaItems(restored,prefs.getInt("index",0).coerceIn(0,restored.lastIndex),prefs.getLong("position",0)); player.prepare() }
         }
         player.addListener(object : Player.Listener {
-            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { saveQueue() }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if(!isPlaying) checkpoint() }
-            override fun onPlaybackStateChanged(playbackState: Int) { if(playbackState == Player.STATE_ENDED) checkpoint() }
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { saveQueue(includeItems = true) }
+            override fun onEvents(player: Player, events: Player.Events) {
+                val playingChanged = events.contains(Player.EVENT_IS_PLAYING_CHANGED)
+                if (playingChanged) {
+                    handler.removeCallbacks(tick)
+                    if (player.isPlaying) handler.postDelayed(tick, 15_000L)
+                }
+                if ((playingChanged && !player.isPlaying) ||
+                    (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) && player.playbackState == Player.STATE_ENDED)) checkpoint()
+            }
         })
-        handler.postDelayed(tick,15000)
     }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
     override fun onDestroy() { checkpoint(); handler.removeCallbacks(tick); syncScope.cancel(); handler.removeCallbacks(sleep); active = null; session?.run { player.release(); release() }; super.onDestroy() }

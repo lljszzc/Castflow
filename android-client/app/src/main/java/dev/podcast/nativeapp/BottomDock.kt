@@ -2,9 +2,7 @@ package dev.podcast.nativeapp
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -30,7 +28,8 @@ import coil.compose.AsyncImage
     val motion by animateFloatAsState(if(compact) 1f else 0f,spring(dampingRatio = 1f,stiffness = 340f),label = "dockMorph")
     val p = motion.coerceIn(0f,1f)
     val lift = dockBottomLift()
-    val selected by animateFloatAsState(tabs.indexOfFirst { it.first == tab }.coerceAtLeast(0).toFloat(),spring(1f,420f),label = "tabSelection")
+    val activeTab = if (tab == "排行榜") "新发现" else tab
+    val selected by animateFloatAsState(tabs.indexOfFirst { it.first == activeTab }.coerceAtLeast(0).toFloat(),spring(1f,420f),label = "tabSelection")
     val expanded = if(current != null) 107.dp else 56.dp
     BoxWithConstraints(Modifier.padding(horizontal = 16.dp).padding(bottom = lift).fillMaxWidth().height(lerp(expanded,43.dp,p))) {
         val width = maxWidth
@@ -52,16 +51,16 @@ import coil.compose.AsyncImage
             Box(Modifier.fillMaxSize()) {
                 if(p < .65f) {
                     val cell = navWidth/4
-                    Box(Modifier.offset(x = cell*selected).padding(4.dp).width(cell-8.dp).fillMaxHeight().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }.clip(RoundedCornerShape(30.dp)).background(Color.Black.copy(alpha = .10f)))
+                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((cell * selected).roundToPx(), 0) }.padding(4.dp).width(cell-8.dp).fillMaxHeight().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }.clip(RoundedCornerShape(30.dp)).background(Color.Black.copy(alpha = .10f)))
                     Row(Modifier.fillMaxSize().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }) {
                         tabs.forEach { (name,icon) -> Column(Modifier.weight(1f).fillMaxHeight().glassTap { onTab(name) },verticalArrangement = Arrangement.Center,horizontalAlignment = Alignment.CenterHorizontally) {
-                            val tint = if(tab == name) Color(0xFF008CFF) else Color.Black
+                            val tint = if(activeTab == name) Color(0xFF008CFF) else Color.Black
                             LocalizedIcon(icon,name,Modifier.size(23.dp),tint = tint)
                             LocalizedText(name,fontSize = 10.sp,lineHeight = 13.sp,color = tint)
                         } }
                     }
                 } else Box(Modifier.fillMaxSize().glassTap(onExpand),contentAlignment = Alignment.Center) {
-                    LocalizedIcon(tabs.firstOrNull { it.first == tab }?.second ?: Icons.Rounded.Home,"展开导航",Modifier.size(24.dp).graphicsLayer { alpha = ((p-.5f)*2).coerceIn(0f,1f) },tint = Color(0xFF008CFF))
+                    LocalizedIcon(tabs.firstOrNull { it.first == activeTab }?.second ?: Icons.Rounded.Home,"展开导航",Modifier.size(24.dp).graphicsLayer { alpha = ((p-.5f)*2).coerceIn(0f,1f) },tint = Color(0xFF008CFF))
                 }
             }
         }

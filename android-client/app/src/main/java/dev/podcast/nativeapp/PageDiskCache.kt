@@ -35,11 +35,16 @@ class PageDiskCache(context: Context) {
         private fun decodeItems(a: JSONArray?): List<PodcastItem> = a?.items()?.map { PodcastItem(it.getString("id"),it.getString("type"),it.optString("title"),it.optString("author"),it.optString("artwork"),"",it.optString("description"),it.optLong("duration"),it.optString("url")) } ?: emptyList()
         internal fun encode(p: CachedPage) = JSONObject().put("rows",items(p.rows)).put("warning",p.warning)
             .put("shelves",JSONArray().apply { p.shelves.forEach { put(JSONObject().put("id",it.id).put("title",it.title).put("items",items(it.items))) } })
-            .put("categories",JSONArray().apply { p.categories.forEach { put(JSONObject().put("id",it.id).put("title",it.title).put("artwork",it.artwork).put("route",it.route).put("color",it.color).put("ink",it.ink)) } })
-        internal fun decode(p: JSONObject) = CachedPage(decodeItems(p.optJSONArray("rows")),p.optJSONArray("shelves")?.items()?.map { EditorialSection(it.getString("id"),it.getString("title"),decodeItems(it.optJSONArray("items"))) } ?: emptyList(),p.optJSONArray("categories")?.items()?.map { BrowseCategory(it.getString("id"),it.getString("title"),it.optString("artwork"),it.getString("route"),it.optLong("color"),it.optLong("ink")) } ?: emptyList(),p.optString("warning"),emptyList(),-60_001L)
+            .put("categories",JSONArray().apply { p.categories.forEach { put(JSONObject().put("id",it.id).put("title",it.title).put("artwork",it.artwork).put("route",it.route).put("color",it.color)) } })
+        internal fun decode(p: JSONObject) = CachedPage(decodeItems(p.optJSONArray("rows")),p.optJSONArray("shelves")?.items()?.map { EditorialSection(it.getString("id"),it.getString("title"),decodeItems(it.optJSONArray("items"))) } ?: emptyList(),p.optJSONArray("categories")?.items()?.map { BrowseCategory(it.getString("id"),it.getString("title"),it.optString("artwork"),it.getString("route"),it.optLong("color", 0xFFE9EDF4)) } ?: emptyList(),p.optString("warning"),emptyList(),-60_001L)
     }
 }
 fun <T,V> updatedFirst(fresh: List<T>, old: List<T>, identity: (T) -> Pair<String,V>): List<T> {
+    if (fresh.size < 2 || old.isEmpty()) return fresh
     val previous = old.associate { identity(it) }
-    return fresh.sortedBy { val (key,value) = identity(it); if(previous[key] != value) 0 else 1 }
+    val (changed, unchanged) = fresh.partition {
+        val (key, value) = identity(it)
+        previous[key] != value
+    }
+    return changed + unchanged
 }

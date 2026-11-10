@@ -5,6 +5,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 
 private val labels = mapOf(
+    "热门节目排行" to R.string.chart_shows,
+    "热门单集排行" to R.string.chart_episodes,
+    "订阅节目排行" to R.string.chart_subscribers,
     "主页" to R.string.ui_000,
     "新发现" to R.string.ui_001,
     "资料库" to R.string.ui_002,
@@ -167,10 +170,10 @@ private val labels = mapOf(
     "體育" to R.string.category_33
 )
 private val canonicalLabels by lazy { labels.entries.associate { editorialTitle(it.key) to it.value } }
+private val labelPatterns = listOf("账户地区：" to "账户地区：%s", "下载中 " to "下载中 %s", "暂未载入：" to "暂未载入：%s")
 fun uiText(text: String, context: Context): String {
     (labels[text] ?: canonicalLabels[editorialTitle(text)])?.let { return context.getString(it) }
-    val patterns = listOf("账户地区：" to "账户地区：%s", "下载中 " to "下载中 %s", "暂未载入：" to "暂未载入：%s")
-    patterns.forEach { (prefix,template) -> if(text.startsWith(prefix)) {
+    labelPatterns.forEach { (prefix,template) -> if(text.startsWith(prefix)) {
         val tail = text.removePrefix(prefix)
         return context.getString(labels.getValue(template), if(prefix == "暂未载入：") tail.split("、").joinToString(", ") { uiText(it,context) } else tail)
     } }
@@ -183,5 +186,4 @@ fun uiText(text: String, context: Context): String {
     LocalConfiguration.current
     return uiText(text,LocalContext.current)
 }
-suspend fun androidx.compose.material3.SnackbarHostState.showLocalizedSnackbar(message: String,context: Context): androidx.compose.material3.SnackbarResult = showSnackbar(uiText(message,context))
 fun contentLanguage(): String = if(java.util.Locale.getDefault().language == "zh") "zh-Hans-CN" else "en-US"

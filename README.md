@@ -6,7 +6,7 @@
 
 <img src="design/icon-concepts/castflow-a-red-3d-fullbleed.png" width="160" alt="Castflow icon" />
 
-## Version 1.0.0
+## Version 1.1.0
 
 - 首页、新发现、分类浏览、节目与单集排行榜、节目及单集搜索。
 - Apple 官方网页登录；个人资料库、关注节目、保存单集、最近播放和继续收听。
@@ -20,11 +20,21 @@ This is an independent community project, not an Apple or Xiaomi product. Catalo
 
 ### Current boundaries
 
-1.0 labels this first open-source version; it does not imply feature parity with Apple Podcasts. Paid/protected media, transcripts, chapters, full channel pages, long-lived authentication renewal, and robust cross-device progress conflict resolution are not complete. The application currently targets SDK 35 and requires Android 12 / API 31 or newer. Some validation was performed on Android 17 / HyperOS 4; this is not a claim of complete Android 17 API adoption or stable 120 Hz performance.
+1.0 labels this first open-source version; it does not imply feature parity with Apple Podcasts. Paid/protected media, transcripts, chapters, full channel pages, long-lived authentication renewal, and robust cross-device progress conflict resolution are not complete. The application currently targets SDK 36 and requires Android 12 / API 31 or newer. Some validation was performed on Android 17 / HyperOS 4; this is not a claim of complete Android 17 API adoption or stable 120 Hz performance.
 
 ## Build
 
-Install JDK 17 and Android SDK platform 35 / build-tools 35.0.0. Set `JAVA_HOME` and `ANDROID_HOME` (or create an untracked `android-client/local.properties` containing `sdk.dir=...`).
+To continue development on another machine, clone the repository and read
+`AGENTS.md`. The `main` branch contains ongoing work. To start a branch from
+the exact 1.1 release, run:
+
+```bash
+git clone https://github.com/lljszzc/Castflow.git
+cd Castflow
+git switch -c work-from-1.1 v1.1.0
+```
+
+Install JDK 17 and Android SDK platform 36 / build-tools 35.0.0. Set `JAVA_HOME` and `ANDROID_HOME` (or create an untracked `android-client/local.properties` containing `sdk.dir=...`).
 
 ```bash
 cd android-client
@@ -33,6 +43,15 @@ cd android-client
 ```
 
 `assemblePerformance` creates an optimized, non-debuggable development APK signed with the local Android debug key. A clean machine uses a different debug key; it cannot update an APK signed by another key. Signing keys are never included in this repository. No production signing infrastructure is configured.
+
+For Android 17 cold-start and anomaly profiling, build `assembleProfileLab`.
+This creates a debuggable installation with the separate package ID
+`dev.podcast.nativeapp.profilelab`. Use it signed out with synthetic or public content.
+Launch once to register the triggers, then cold-start the lab app again. Use
+`adb logcat -s CastflowProfiles:I` for registration and result status and
+`adb shell run-as dev.podcast.nativeapp.profilelab ls files/profiling` to inspect local artifacts.
+Android controls sampling, rate limits and delivery. Debuggable lab timings can differ
+from the regular performance APK. Uninstall the lab package to clear its diagnostics.
 
 ## Documentation
 

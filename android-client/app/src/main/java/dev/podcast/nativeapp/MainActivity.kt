@@ -1,6 +1,12 @@
 package dev.podcast.nativeapp
+import androidx.core.net.toUri
+
+import androidx.core.content.edit
 
 import android.content.ComponentName
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.media3.common.Player
 import android.os.Bundle
 import android.webkit.*
 import androidx.activity.ComponentActivity
@@ -13,12 +19,12 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import dev.chrisbanes.haze.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -28,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -36,17 +41,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.input.nestedscroll.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.abs
 import kotlin.math.sign
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaController
@@ -71,12 +70,19 @@ class MainActivity : ComponentActivity() {
 }
 data class CachedPage(val rows: List<PodcastItem>, val shelves: List<EditorialSection>, val categories: List<BrowseCategory>, val warning: String, val cursors: List<String>, val time: Long = android.os.SystemClock.elapsedRealtime())
 private object PageMemory {
-    private var account: String? = null
+    private var accountDigest: ByteArray? = null
     val positions = mutableMapOf<String,Pair<Int,Int>>()
     val pages = object : LinkedHashMap<String,CachedPage>(24,.75f,true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String,CachedPage>?) = size > 24
     }
-    fun validate(token: String?): Boolean { val changed = account != token; if(changed) { pages.clear(); positions.clear(); account = token }; return changed }
+    fun validate(token: String?): Boolean {
+        val digest = token?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray()) }
+        if (accountDigest.contentEquals(digest)) return false
+        pages.clear()
+        positions.clear()
+        accountDigest = digest
+        return true
+    }
 }
 private fun sessionToken(): String? = CookieManager.getInstance().getCookie("https://podcasts.apple.com")?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("media-user-token=") }?.substringAfter('=')
 
@@ -138,29 +144,39 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     var playbackRequest by remember { mutableIntStateOf(0) }
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
+    fun syncController(p: Player?) {
+        playing = p != null && p.playWhenReady && p.playbackState != Player.STATE_ENDED && p.playerError == null
+        buffering = p != null && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING
+        val media = p?.currentMediaItem
+        if (media == null) current = null
+        else if (current?.id != media.mediaId) {
+            val metadata = media.mediaMetadata
+            current = PodcastItem(media.mediaId, "podcast-episodes", metadata.title?.toString().orEmpty(),
+                metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString().orEmpty(), "", "", p.duration.coerceAtLeast(0))
+        }
+    }
     DisposableEffect(player) {
         val controller = player
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onEvents(p: androidx.media3.common.Player, events: androidx.media3.common.Player.Events) {
-                playing = p.playWhenReady && p.playbackState != androidx.media3.common.Player.STATE_ENDED && p.playerError == null
-                buffering = p.playWhenReady && p.playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                syncController(p)
+                if (events.contains(Player.EVENT_TIMELINE_CHANGED)) queueRefresh++
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 buffering = false; playing = false
                 scope.launch { snackbar.showLocalizedSnackbar("音频加载失败，请重试") }
             }
         }
-        playing = controller?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED && it.playerError == null } ?: false
-        buffering = controller?.let { it.playWhenReady && it.playbackState == androidx.media3.common.Player.STATE_BUFFERING } ?: false
+        syncController(controller)
         controller?.addListener(listener)
         onDispose { controller?.removeListener(listener) }
     }
     val playbackLoading = pendingPlayback != null || buffering
-    var position by remember { mutableLongStateOf(0) }
-    var duration by remember { mutableLongStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var downloadEntries by remember { mutableStateOf(emptyMap<String, Downloads.Entry>()) }
     var refresh by remember { mutableIntStateOf(0) }
     var hasMore by remember { mutableStateOf(false) }
-    BackHandler(enabled = (browseCategory != null || detail != null || (tab == "资料库" && section != "概览")) && !auth && !fullPlayer) { if(detail != null) detail = null else if(browseCategory != null) browseCategory = null else section = "概览" }
+    BackHandler(enabled = (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) && !auth && !fullPlayer) { if(detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "排行榜") { tab = "新发现"; section = "概览" } else section = "概览" }
     val detailColors = rememberArtworkColors(detail?.artwork ?: "")
     val bg by animateColorAsState(if (detail != null) detailColors.background else Color.White, label = "coverBackground")
     val ink = if(bg.luminance() > .179f) Color.Black else Color.White
@@ -169,27 +185,61 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     var loadedPage by remember { mutableStateOf("") }
     DisposableEffect(Unit) {
         val future = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
-        future.addListener({ player = future.get() }, context.mainExecutor)
-        onDispose { MediaController.releaseFuture(future) }
+        var disposed = false
+        future.addListener({
+            if (!disposed) try {
+                player = future.get()
+            } catch (_: java.util.concurrent.ExecutionException) {
+                scope.launch { snackbar.showLocalizedSnackbar("播放器正在连接，请重试") }
+            }
+        }, context.mainExecutor)
+        onDispose { disposed = true; MediaController.releaseFuture(future) }
     }
-    LaunchedEffect(player) { while (true) { player?.let {
-        if(fullPlayer) position = it.currentPosition; duration = it.duration.coerceAtLeast(0)
-        it.currentMediaItem?.let { media -> if (current?.id != media.mediaId) current = PodcastItem(media.mediaId, "podcast-episodes", media.mediaMetadata.title?.toString() ?: "", media.mediaMetadata.artist?.toString() ?: "", media.mediaMetadata.artworkUri?.toString() ?: "", "", "", duration) }
-    }; delay(500) } }
     var handledRefresh by remember { mutableIntStateOf(-1) }
     suspend fun load() {
         val force = handledRefresh != refresh
         handledRefresh = refresh
         error = null
-        if(PageMemory.validate(sessionToken())) loadedPage = ""
-        val pageKey = "${contentLanguage()}/$tab/$section/${detail?.id}/${browseCategory?.id}/$query"
         val cacheAccount = sessionToken()
+        if(PageMemory.validate(cacheAccount)) loadedPage = ""
+        val pageKey = "${contentLanguage()}/$tab/$section/${detail?.id}/${browseCategory?.id}/$query"
+        if (tab == "资料库" && section == "下载" && detail == null && browseCategory == null) {
+            if (loadedPage != pageKey) {
+                if (loadedPage.isNotEmpty()) PageMemory.positions[loadedPage] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+                val saved = PageMemory.positions[pageKey]
+                listState.requestScrollToItem(saved?.first ?: 0, saved?.second ?: 0)
+                rows = emptyList()
+                compact = false
+                loadedPage = pageKey
+            }
+            shelves = emptyList()
+            categories = emptyList()
+            hasMore = false
+            api.clearPagination()
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                try {
+                    do {
+                        val entries = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { downloads.entries() }
+                        downloadEntries = entries.associateBy { it.item.id }
+                        rows = entries.map { it.item }
+                        loading = false
+                        if (entries.none { it.active }) break
+                        delay(3000)
+                    } while (true)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    error = "加载失败，请重试"
+                    loading = false
+                }
+            }
+            return
+        }
         val cached = PageMemory.pages[pageKey] ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { PageDiskCache(context).read(cacheAccount,pageKey) }?.also { PageMemory.pages[pageKey] = it }
         if(loadedPage != pageKey) {
             if(loadedPage.isNotEmpty()) PageMemory.positions[loadedPage] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
             val savedPosition = PageMemory.positions[pageKey]
             listState.requestScrollToItem(savedPosition?.first ?: 0,savedPosition?.second ?: 0)
-            compact = false
+            compact = detail != null
             rows = cached?.rows ?: emptyList(); shelves = cached?.shelves ?: emptyList()
             categories = cached?.categories ?: emptyList(); homeWarning = cached?.warning ?: ""
             loadedPage = pageKey
@@ -204,22 +254,22 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
             rows = when {
                 detail != null -> api.episodes(detail!!.id)
                 browseCategory != null -> api.category(browseCategory!!)
-                tab == "主页" -> { shelves = api.home(signedIn); homeWarning = api.homeFailures.joinToString("、"); shelves.flatMap { it.items }.distinctBy { it.type+it.id } }
+                tab == "主页" -> { shelves = api.home(signedIn); homeWarning = api.homeFailures.joinToString("、"); emptyList() }
                 tab == "搜索" && query.isBlank() -> { categories = api.categories(); emptyList() }
-                tab == "搜索" -> if (query.isBlank()) emptyList() else api.search(query)
-                tab == "资料库" && section == "下载" -> downloads.entries()
+                tab == "搜索" -> api.search(query)
                 tab == "资料库" && signedIn -> api.library(when (section) { "已保存" -> "library/podcast-episodes"; "最新单集" -> "library/latest-episodes"; "最近播放" -> "recent/played/podcast-episodes"; else -> "library/podcasts" })
                 tab == "资料库" -> emptyList()
-                tab == "主页" && signedIn -> api.library("continue-playing/podcast-episodes")
                 tab == "排行榜" -> api.charts(section == "单集", section == "订阅节目")
-                tab == "新发现" -> api.discover()
+                tab == "新发现" -> { shelves = api.discovery(); emptyList() }
                 else -> api.charts()
             }
-            if(tab != "主页") shelves = if(tab == "新发现" && detail == null && browseCategory == null) api.editorialSections else emptyList()
+            if (detail != null || browseCategory != null || (tab != "新发现" && tab != "主页")) {
+                shelves = emptyList()
+            }
             hasMore = api.next != null
             if(cached != null) {
-                rows = updatedFirst(rows,cached.rows) { it.type+":"+it.id to it }
-                shelves = updatedFirst(shelves,cached.shelves) { it.title to it.items }
+                if (tab != "排行榜") rows = updatedFirst(rows,cached.rows) { it.type+":"+it.id to it }
+                if (tab != "新发现") shelves = updatedFirst(shelves,cached.shelves) { it.title to it.items }
                 categories = updatedFirst(categories,cached.categories) { it.id to it }
             }
             val snapshot = CachedPage(rows,shelves,categories,homeWarning,api.paginationSnapshot())
@@ -228,8 +278,13 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "加载失败，请重试" }
         finally { loading = false }
     }
-    LaunchedEffect(tab, section) { if(tab == "资料库" && section == "下载") while(true) { delay(3000); refresh++ } }
-    LaunchedEffect(tab, section, detail, browseCategory, query, signedIn, refresh) { if (tab == "搜索" && query.isNotBlank()) delay(350); load() }
+    var paginationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    LaunchedEffect(tab, section, detail, browseCategory, query, signedIn, refresh) {
+        paginationJob?.cancel()
+        hasMore = false
+        if (tab == "搜索" && query.isNotBlank() && detail == null) delay(350)
+        load()
+    }
     fun play(item: PodcastItem, enqueue: Boolean = false) {
         val request = if(enqueue) playbackRequest else ++playbackRequest
         if(!enqueue) pendingPlayback = item
@@ -239,7 +294,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
             if(!enqueue && request != playbackRequest) return@launch
             if (ep.audio.isBlank()) { if(!enqueue && request == playbackRequest) pendingPlayback = null; snackbar.showLocalizedSnackbar("本单集未提供可用的公开音频"); return@launch }
             val controller = player ?: run { if(!enqueue && request == playbackRequest) pendingPlayback = null; snackbar.showLocalizedSnackbar("播放器正在连接，请重试"); return@launch }
-            val media = MediaItem.Builder().setMediaId(ep.id).setUri(ep.audio).setMediaMetadata(MediaMetadata.Builder().setTitle(ep.title).setArtist(ep.author).setArtworkUri(android.net.Uri.parse(ep.artwork)).build()).build()
+            val media = MediaItem.Builder().setMediaId(ep.id).setUri(ep.audio).setMediaMetadata(MediaMetadata.Builder().setTitle(ep.title).setArtist(ep.author).setArtworkUri(ep.artwork.toUri()).build()).build()
             if (enqueue) { controller.addMediaItem(media); if(controller.mediaItemCount == 1) controller.prepare(); snackbar.showLocalizedSnackbar("已加入待播列表"); return@launch }
             val resume = kotlinx.coroutines.withTimeout(30000) { progress.resume(ep.id,api,signedIn) }
             if(request != playbackRequest) return@launch
@@ -270,7 +325,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     Box(Modifier.fillMaxSize()) {
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = bg, contentColor = ink,
         bottomBar = {
-            BottomDock(compact || detail != null, tab, pendingPlayback ?: current, playing, playbackLoading,
+            BottomDock(compact, tab, pendingPlayback ?: current, playing, playbackLoading,
                 onTab = { tab = it; detail = null; browseCategory = null; section = "概览" },
                 onExpand = { compact = false }, onPlayer = { fullPlayer = true },
                 onToggle = { player?.run { if(playWhenReady) pause() else { if(playbackState == androidx.media3.common.Player.STATE_IDLE) prepare(); play() } } },
@@ -278,7 +333,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         }) { padding ->
         LazyColumn(Modifier.fillMaxSize().graphicsLayer { alpha = pageMotion.value; translationX = (1f-pageMotion.value)*36f }.padding(top = padding.calculateTopPadding()).hazeSource(LocalGlassState.current).background(bg).nestedScroll(scrollIntent), state = listState, contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 200.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item { Row(Modifier.fillMaxWidth().padding(top = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) SoftIconButton(onClick = { if (detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "资料库") section = "概览" else tab = "新发现" }) { LocalizedIcon(Icons.Rounded.ArrowBack, "返回") }
+                if (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) SoftIconButton(onClick = { if (detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "资料库") section = "概览" else { tab = "新发现"; section = "概览" } }) { LocalizedIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
                 LocalizedText(if(detail != null) "" else browseCategory?.title ?: tab, Modifier.weight(1f), fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2)
                 Box {
                     MoreMenuButton(onClick = { menu = true })
@@ -288,35 +343,34 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                     ), { menu = false })
                 }
             } }
-            if (detail != null) item { val show = detail!!; Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (detail != null) item { val show = detail ?: return@item; Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 AsyncImage(show.artwork, show.title, Modifier.fillMaxWidth(.72f).aspectRatio(1f).clip(RoundedCornerShape(18.dp)))
                 androidx.compose.material3.Text(show.title, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 androidx.compose.material3.Text(show.author, fontSize = 20.sp, color = detailColors.secondary)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SoftIconButton(onClick = { libraryPreferences.togglePin(show); layoutRevision++ }) { LocalizedIcon(if(libraryPreferences.pins().any { it.id == show.id }) Icons.Rounded.PushPin else Icons.Rounded.Add, "置顶") }
-                    SoftFilledButton(onClick = { rows.firstOrNull()?.let { play(it) } }, modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
+                    SoftFilledButton(onClick = { rows.firstOrNull()?.let { play(it) } }, enabled = rows.isNotEmpty() && rows.first().type == "podcast-episodes", modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
                     SoftIconButton(onClick = { update(show, true) }) { LocalizedIcon(Icons.Rounded.AddCircleOutline, "关注节目") }
                 }
                 var expanded by remember(show.id) { mutableStateOf(false) }
-                androidx.compose.material3.Text(android.text.Html.fromHtml(show.description, 0).toString(), color = detailColors.secondary, maxLines = if(expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().glassTap { expanded = !expanded })
+                androidx.compose.material3.Text(remember(show.description) { android.text.Html.fromHtml(show.description, 0).toString() }, color = detailColors.secondary, maxLines = if(expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().glassTap { expanded = !expanded })
                 Row { SoftTextButton(onClick = { update(show, false) }) { LocalizedText("取消关注", color = ink) }; SoftTextButton(onClick = { expanded = !expanded }) { LocalizedText(if(expanded) "收起简介" else "更多", color = ink) } }
                 LocalizedText("单集", Modifier.align(Alignment.Start), fontSize = 24.sp, fontWeight = FontWeight.Bold)
             } }
             if (tab == "搜索" && detail == null && browseCategory == null) item { OutlinedTextField(query, { query = it; browseCategory = null }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = Color(0xFFF0F1F4), unfocusedContainerColor = Color(0xFFF0F1F4)), placeholder = { LocalizedText("节目、单集与创作者") }, leadingIcon = { LocalizedIcon(Icons.Rounded.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
-            if (tab == "新发现" && detail == null) item { SoftTextButton(onClick = { tab = "排行榜"; section = "节目" }) { LocalizedText("排行榜", fontSize = 20.sp) } }
             if (tab == "排行榜" && detail == null) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                (if (tab == "排行榜") listOf("节目", "单集", "订阅节目") else listOf("节目", "已保存", "最新单集", "下载")).forEach { label -> SoftTextButton(onClick = { section = label }, modifier = Modifier.background(if(section == label) Color(0xFFE7F3FF) else Color.Transparent,RoundedCornerShape(22.dp))) { LocalizedText(label,fontWeight = if(section == label) FontWeight.SemiBold else FontWeight.Normal) } }
+                listOf("节目", "单集", "订阅节目").forEach { label -> SoftTextButton(onClick = { section = label }, modifier = Modifier.background(if(section == label) Color(0xFFE7F3FF) else Color.Transparent,RoundedCornerShape(22.dp))) { LocalizedText(label,fontWeight = if(section == label) FontWeight.SemiBold else FontWeight.Normal) } }
             } }
             if(tab == "主页" && detail == null && homeWarning.isNotBlank()) item { LocalizedText("暂未载入：$homeWarning",color = Color.Gray,fontSize = 13.sp); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } }
             if (tab == "新发现" && detail == null && shelves.isEmpty()) item { LocalizedText("编辑精选", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
             if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             error?.let { message -> item { LocalizedText(message, color = MaterialTheme.colorScheme.error); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } } }
-            if (!loading && rows.isEmpty() && error == null && !(tab == "搜索" && query.isBlank() && categories.isNotEmpty())) item { Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (!loading && rows.isEmpty() && shelves.isEmpty() && error == null && !(tab == "搜索" && query.isBlank() && categories.isNotEmpty())) item { Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 LocalizedIcon(Icons.Rounded.Headphones, null, Modifier.size(54.dp), tint = Color.Gray)
-                LocalizedText(when { tab == "资料库" && !signedIn -> "登录后查看你的 Apple 播客资料库"; tab == "搜索" -> "搜索你感兴趣的声音"; else -> "这里暂时没有内容" }, Modifier.padding(top = 16.dp))
-                if (!signedIn && tab == "资料库") SoftFilledButton(onClick = { auth = true }) { LocalizedText("登录") }
+                LocalizedText(when { tab == "资料库" && section != "下载" && !signedIn -> "登录后查看你的 Apple 播客资料库"; tab == "搜索" -> "搜索你感兴趣的声音"; else -> "这里暂时没有内容" }, Modifier.padding(top = 16.dp))
+                if (!signedIn && tab == "资料库" && section != "下载") SoftFilledButton(onClick = { auth = true }) { LocalizedText("登录") }
             } }
-            if(tab == "搜索" && query.isBlank() && browseCategory == null) {
+            if(tab == "搜索" && query.isBlank() && browseCategory == null && detail == null) {
                 item { LocalizedText("浏览分类",fontSize = 24.sp,fontWeight = FontWeight.Bold) }
                 items(categories.chunked(2)) { group -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     group.forEach { category -> Box(Modifier.weight(1f).height(90.dp).clip(RoundedCornerShape(16.dp)).background(Color(category.color)).glassTap { browseCategory = category }) {
@@ -324,9 +378,18 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                         LocalizedText(category.title,Modifier.align(Alignment.BottomStart).fillMaxWidth(.7f).padding(12.dp),fontWeight = FontWeight.Bold,fontSize = 17.sp,color = Color.White,maxLines = 2)
                     } }; if(group.size == 1) Spacer(Modifier.weight(1f))
                 } }
-            } else if(tab in listOf("主页","新发现") && detail == null && shelves.isNotEmpty()) {
+            } else if((tab == "主页" || tab == "新发现") && detail == null && shelves.isNotEmpty()) {
                 items(shelves, key = { it.id }) { shelf -> Column(Modifier.animateItem(fadeInSpec = tween(180),fadeOutSpec = tween(120),placementSpec = tween(220)),verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LocalizedText(shelf.title, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    val chart = DiscoveryChart.entries.firstOrNull { it.shelfId == shelf.id }
+                    if (chart == null) {
+                        LocalizedText(shelf.title, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Row(Modifier.fillMaxWidth().glassTap { section = chart.section; tab = "排行榜" }.heightIn(min = 48.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            LocalizedText(chart.title, Modifier.weight(1f), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                            LocalizedIcon(Icons.Rounded.ChevronRight, null)
+                        }
+                    }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         items(shelf.items, key = { it.id }) { entry -> Column(Modifier.width(155.dp).glassTap { if(entry.type == "podcasts") detail = entry else episodeInfo = entry }) {
                             AsyncImage(entry.artwork,entry.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)))
@@ -335,7 +398,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                         } }
                     }
                 } }
-            } else             if(tab == "资料库" && section == "概览" && detail == null) {
+            } else if(tab == "资料库" && section == "概览" && detail == null) {
                 item { LibraryHubHeader(libraryPreferences, layoutRevision, { section = it }, { detail = it }) }
                 items(rows.chunked(2)) { group -> LibraryGridRow(group) { detail = it } }
             } else items(rows, key = { it.type + it.id }, contentType = { it.type }) { item ->
@@ -353,15 +416,15 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                         ), { actions = false })
                     }
                 }
-                if(tab == "资料库" && section == "下载") { LocalizedText(downloads.status(item.id), color = Color.Gray, fontSize = 13.sp)
-                    if(downloads.status(item.id).contains("失败") || downloads.status(item.id).contains("失效")) SoftTextButton(onClick = { runCatching { downloads.retry(item) }.onFailure { scope.launch { snackbar.showLocalizedSnackbar("无法重试，请删除后重新下载") } }; refresh++ }) { LocalizedText("重试下载") }
+                if(tab == "资料库" && section == "下载") downloadEntries[item.id]?.let { entry -> LocalizedText(entry.status, color = Color.Gray, fontSize = 13.sp)
+                    if(entry.retryable) SoftTextButton(onClick = { runCatching { downloads.retry(item) }.onFailure { scope.launch { snackbar.showLocalizedSnackbar("无法重试，请删除后重新下载") } }; refresh++ }) { LocalizedText("重试下载") }
                 }
                 HorizontalDivider(color = Color.Black.copy(alpha = .05f)) }
             }
-            if (hasMore) item { SoftTextButton(enabled = !loading, onClick = { scope.launch {
+            if (hasMore) item { SoftTextButton(enabled = !loading, onClick = { if (paginationJob?.isActive != true) paginationJob = scope.launch {
                 loading = true
                 try { rows = (rows + api.more()).distinctBy { it.type + it.id }; hasMore = api.next != null; PageMemory.pages[loadedPage] = CachedPage(rows,shelves,categories,homeWarning,api.paginationSnapshot()) }
-                catch (e: Exception) { snackbar.showLocalizedSnackbar(e.message ?: "加载下一页失败") }
+                catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; snackbar.showLocalizedSnackbar(e.message ?: "加载下一页失败") }
                 finally { loading = false }
             } }) { LocalizedText("加载更多") } }
         }
@@ -373,25 +436,32 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         }
     }) }
     editor?.let { action -> LibraryEditor(libraryPreferences, action == "编辑置顶项", { editor = null }) { layoutRevision++; editor = null } }
-    if(appSettings) SoftDialog(onDismissRequest = { appSettings = false }, title = { LocalizedText("设置") }, text = { Column {
+    if(appSettings) SoftDialog(onDismissRequest = { appSettings = false }, title = { LocalizedText("设置") }) { closeWith -> Column {
         LocalizedText("账户地区：${api.storefront.uppercase()}")
         var wifiOnly by remember { mutableStateOf(libraryPreferences.prefs.getBoolean("wifiOnly",true)) }
-        Row(verticalAlignment = Alignment.CenterVertically) { LocalizedText("仅 Wi-Fi 下载", Modifier.weight(1f)); Switch(wifiOnly, { wifiOnly = it; libraryPreferences.prefs.edit().putBoolean("wifiOnly",it).apply() }) }
+        Row(verticalAlignment = Alignment.CenterVertically) { LocalizedText("仅 Wi-Fi 下载", Modifier.weight(1f)); Switch(wifiOnly, { wifiOnly = it; libraryPreferences.prefs.edit { putBoolean("wifiOnly",it) } }) }
         LocalizedText("默认播放速度")
-        Row { listOf(1f,1.25f,1.5f,2f).forEach { speed -> SoftTextButton(onClick = { libraryPreferences.prefs.edit().putFloat("speed",speed).apply(); player?.setPlaybackSpeed(speed) }) { LocalizedText("${speed}×") } } }
+        Row { listOf(1f,1.25f,1.5f,2f).forEach { speed -> SoftTextButton(onClick = { libraryPreferences.prefs.edit { putFloat("speed",speed) }; player?.setPlaybackSpeed(speed) }) { LocalizedText("${speed}×") } } }
 
         LocalizedText("下载保存在本机；置顶与类别设置在本机保存。")
-        SoftTextButton(onClick = { appSettings = false; tab = "资料库"; section = "下载" }) { LocalizedText("管理下载") }
-        SoftTextButton(onClick = { appSettings = false; auth = true }) { LocalizedText("管理账户") }
-    } }, confirmButton = { SoftTextButton(onClick = { appSettings = false }) { LocalizedText("完成") } })
+        SoftTextButton(onClick = { closeWith { appSettings = false; tab = "资料库"; section = "下载" } }) { LocalizedText("管理下载") }
+        SoftTextButton(onClick = { closeWith { appSettings = false; auth = true } }) { LocalizedText("管理账户") }
+    } }
     AnimatedVisibility(auth,enter = fadeIn(tween(180)) + slideInVertically(tween(260,easing = MotionTokens.enter)) { it/12 },exit = fadeOut(tween(140)) + slideOutVertically(tween(180)) { it/12 }) { AccountScreen(signedIn,api.storefront,api,::sessionToken, { auth = false }, { signedIn = true; auth = false; refresh++ }, {
-        CookieManager.getInstance().removeAllCookies { CookieManager.getInstance().flush() }; signedIn = false; api.storefront = "cn"; rows = emptyList(); auth = false; refresh++
+        CookieManager.getInstance().removeAllCookies {
+            CookieManager.getInstance().flush()
+            signedIn = false
+            api.storefront = "cn"
+            rows = emptyList()
+            auth = false
+            refresh++
+        }
     }) }
-    if(fullPlayer && (pendingPlayback ?: current) != null) FullPlayer((pendingPlayback ?: current)!!, playing, playbackLoading, position, duration,
+    if(fullPlayer) (pendingPlayback ?: current)?.let { displayed -> FullPlayer(displayed, playing, playbackLoading, player,
         onDismiss = { fullPlayer = false }, onToggle = { player?.run { if(playWhenReady) pause() else { if(playbackState == androidx.media3.common.Player.STATE_IDLE) prepare(); play() } } },
         onSeek = { player?.seekTo(it) }, onSpeed = { player?.setPlaybackSpeed(it) },
-        onQueue = { fullPlayer = false; queue = true }, onSave = { update(current!!, true) },
-        sourceBounds = miniPlayerBounds, onSleep = { PlaybackService.active?.setSleep(it) }, onStatusCoverage = { playerCoversBars = it })
+        onQueue = { fullPlayer = false; queue = true }, onSave = { if (!signedIn) fullPlayer = false; update(displayed, true) },
+        sourceBounds = miniPlayerBounds, onSleep = { PlaybackService.active?.setSleep(it) }, onStatusCoverage = { playerCoversBars = it }) }
     if (queue) SoftSheet(onDismissRequest = { queue = false }) {
         val controller = player
         val entries = remember(queueRefresh, controller?.mediaItemCount) { (0 until (controller?.mediaItemCount ?: 0)).map { controller!!.getMediaItemAt(it) } }

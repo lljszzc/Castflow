@@ -160,4 +160,10 @@
     <string name="category_31">電視與電影</string>
     <string name="category_32">音樂</string>
     <string name="category_33">體育</string>
+    <string name="playback_progress">播放进度</string>
+    <string name="collapse_player">收起播放器</string>
+    <string name="dismiss_sheet">关闭面板</string>
+    <string name="chart_shows">热门节目排行</string>
+    <string name="chart_episodes">热门单集排行</string>
+    <string name="chart_subscribers">订阅节目排行</string>
 </resources>

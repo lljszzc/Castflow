@@ -1,8 +1,10 @@
 package dev.podcast.nativeapp
+import androidx.core.net.toUri
+
+import androidx.core.content.edit
 
 import android.app.DownloadManager
 import android.content.Context
-import android.net.Uri
 import android.os.Environment
 import org.json.JSONObject
 
@@ -12,7 +14,7 @@ class Downloads(private val context: Context) {
     private val prefs = context.getSharedPreferences("episode-downloads", Context.MODE_PRIVATE)
     fun enqueue(item: PodcastItem): Boolean {
         require(item.id.matches(Regex("\\d+")))
-        val uri = Uri.parse(item.audio)
+        val uri = item.audio.toUri()
         require(uri.scheme == "https") { "此音频暂不支持安全下载" }
         if (prefs.contains(item.id)) return false
         val request = DownloadManager.Request(uri).setTitle(item.title).setDescription(item.author)
@@ -22,38 +24,55 @@ class Downloads(private val context: Context) {
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_PODCASTS, item.id + ".audio")
         val id = manager.enqueue(request)
         val record = JSONObject().put("downloadId", id).put("title", item.title).put("author", item.author).put("artwork", item.artwork).put("duration", item.duration).put("audio",item.audio)
-        prefs.edit().putString(item.id, record.toString()).apply()
+        prefs.edit { putString(item.id, record.toString()) }
         return true
     }
-    fun completed(): List<PodcastItem> = prefs.all.mapNotNull { (id, raw) ->
-        runCatching {
-            val record = JSONObject(raw as String)
-            val downloadId = record.getLong("downloadId")
-            manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
-                if (!cursor.moveToFirst() || cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_SUCCESSFUL) return@runCatching null
-                val uri = manager.getUriForDownloadedFile(downloadId) ?: return@runCatching null
-                PodcastItem(id, "podcast-episodes", record.getString("title"), record.getString("author"), record.optString("artwork"), uri.toString(), "", record.optLong("duration"))
+    data class Entry(val item: PodcastItem, val status: String, val active: Boolean, val retryable: Boolean)
+
+    fun entries(): List<Entry> {
+        val records = prefs.all.mapNotNull { (id, raw) ->
+            runCatching {
+                val record = JSONObject(raw as String)
+                val item = PodcastItem(id, "podcast-episodes", record.getString("title"), record.getString("author"),
+                    record.optString("artwork"), record.optString("audio"), "", record.optLong("duration"))
+                record.getLong("downloadId") to item
+            }.getOrNull()
+        }.toMap()
+        if (records.isEmpty()) return emptyList()
+        val entries = mutableMapOf<Long, Entry>()
+        // DownloadManager limits this query to the calling app's downloads.
+        manager.query(DownloadManager.Query()).use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+            val statusColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+            val doneColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val totalColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val item = records[id] ?: continue
+                val status = cursor.getInt(statusColumn)
+                val localUri = if (status == DownloadManager.STATUS_SUCCESSFUL) manager.getUriForDownloadedFile(id) else null
+                entries[id] = when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> if (localUri != null)
+                        Entry(item.copy(audio = localUri.toString()), "可离线播放", false, false)
+                        else Entry(item, "下载记录已失效", false, true)
+                    DownloadManager.STATUS_FAILED -> Entry(item, "下载失败，可重试", false, true)
+                    DownloadManager.STATUS_PAUSED -> Entry(item, "已暂停，等待网络", true, false)
+                    DownloadManager.STATUS_PENDING -> Entry(item, "等待下载", true, false)
+                    else -> {
+                        val total = cursor.getLong(totalColumn)
+                        val done = cursor.getLong(doneColumn).coerceAtLeast(0)
+                        val label = if (total > 0) "下载中 ${done * 100 / total}%" else "下载中 ${done / 1024} KB"
+                        Entry(item, label, true, false)
+                    }
+                }
             }
-        }.getOrNull()
-    }
-    fun status(id: String): String {
-        val record = runCatching { JSONObject(prefs.getString(id,null) ?: return "无下载记录") }.getOrNull() ?: return "记录不可用"
-        manager.query(DownloadManager.Query().setFilterById(record.getLong("downloadId"))).use { c ->
-            if(!c.moveToFirst()) return "下载记录已失效"
-            val state = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            val done = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)).coerceAtLeast(0)
-            val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-            return when(state) { DownloadManager.STATUS_SUCCESSFUL -> "可离线播放"; DownloadManager.STATUS_FAILED -> "下载失败，可重试"; DownloadManager.STATUS_PAUSED -> "已暂停，等待网络"; DownloadManager.STATUS_PENDING -> "等待下载"; else -> if(total > 0) "下载中 ${done * 100 / total}%" else "下载中 ${done / 1024} KB" }
         }
-    }
-    fun entries(): List<PodcastItem> {
-        val ready = completed().associateBy { it.id }
-        return prefs.all.mapNotNull { (id,raw) -> ready[id] ?: runCatching { val a = JSONObject(raw as String); PodcastItem(id,"podcast-episodes",a.getString("title"),a.getString("author"),a.optString("artwork"),a.optString("audio"),"",a.optLong("duration")) }.getOrNull() }
+        return records.map { (id, item) -> entries[id] ?: Entry(item, "下载记录已失效", false, true) }
     }
     fun retry(item: PodcastItem) { require(item.audio.startsWith("https://")); remove(item.id); enqueue(item) }
     fun remove(id: String) {
         val raw = prefs.getString(id, null) ?: return
         manager.remove(JSONObject(raw).getLong("downloadId"))
-        prefs.edit().remove(id).apply()
+        prefs.edit { remove(id) }
     }
 }

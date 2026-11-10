@@ -160,4 +160,10 @@
     <string name="category_31">TV &amp; Film</string>
     <string name="category_32">Music</string>
     <string name="category_33">Sports</string>
+    <string name="playback_progress">Playback position</string>
+    <string name="collapse_player">Collapse player</string>
+    <string name="dismiss_sheet">Close panel</string>
+    <string name="chart_shows">Top Shows</string>
+    <string name="chart_episodes">Top Episodes</string>
+    <string name="chart_subscribers">Top Subscriber Shows</string>
 </resources>
