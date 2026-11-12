@@ -1,32 +1,106 @@
-# 听见 · Castflow
+# Castflow / 听见
 
-**A native Android podcast player with soft glass UI, Apple Podcasts browsing and personal library support.**
+Castflow（中文名「听见」）是一个原生 Android 播客客户端，使用 Kotlin、Jetpack Compose 和
+AndroidX Media3 开发。界面支持中文和英文。
 
-听见（Castflow）是一款原生 Android 播客客户端：使用 Kotlin、Jetpack Compose 与 Media3，提供柔光玻璃界面、播客发现、搜索、排行榜、资料库和后台播放。中文系统显示「听见」，其他语言系统显示「Castflow」，界面支持中文和英文。
+Castflow is a native Android podcast client built with Kotlin, Jetpack Compose, and
+AndroidX Media3. The interface supports Chinese and English.
 
-<img src="design/icon-concepts/castflow-a-red-3d-fullbleed.png" width="160" alt="Castflow icon" />
+## Screenshots / 界面截图
 
-## Version 1.1.0
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/home.jpg" width="240" alt="Home"><br>主页 / Home</td>
+    <td align="center"><img src="docs/screenshots/show.jpg" width="240" alt="Show details"><br>节目详情 / Show</td>
+    <td align="center"><img src="docs/screenshots/library.jpg" width="240" alt="Library"><br>资料库 / Library</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/search.jpg" width="240" alt="Search"><br>搜索 / Search</td>
+    <td align="center"><img src="docs/screenshots/player.jpg" width="240" alt="Full player"><br>播放器 / Player</td>
+    <td></td>
+  </tr>
+</table>
 
-- 首页、新发现、分类浏览、节目与单集排行榜、节目及单集搜索。
-- Apple 官方网页登录；个人资料库、关注节目、保存单集、最近播放和继续收听。
-- Media3 后台播放与系统媒体卡片，倍速、跳转、待播队列、睡眠定时。
-- 单集下载及 Wi-Fi 下载偏好、本地置顶与分类设置。
-- 封面取色、柔光玻璃材质、播放页与迷你播放器连续转场。
-- 页面内存/磁盘缓存、后台刷新、更新内容置前和轻量排序动画。
-- 按系统语言显示中英文名称与界面。
+The screenshots show public podcast content and are included to document the
+interface. Podcast titles and cover artwork belong to their respective publishers.
+截图中的节目名称和封面仅用于展示界面，权利归原发布方所有。
 
-This is an independent community project, not an Apple or Xiaomi product. Catalog and account APIs are undocumented and may change. Apple authentication is the only WebView flow; browsing and playback are native.
+## Screenshots / 界面截图
 
-### Current boundaries
+| 主页 / Home | 节目详情 / Show | 资料库 / Library |
+| --- | --- | --- |
+| [<img src="docs/screenshots/home.jpg" width="240" alt="Home">](docs/screenshots/home.jpg) | [<img src="docs/screenshots/show.jpg" width="240" alt="Show details">](docs/screenshots/show.jpg) | [<img src="docs/screenshots/library.jpg" width="240" alt="Library">](docs/screenshots/library.jpg) |
 
-1.0 labels this first open-source version; it does not imply feature parity with Apple Podcasts. Paid/protected media, transcripts, chapters, full channel pages, long-lived authentication renewal, and robust cross-device progress conflict resolution are not complete. The application currently targets SDK 36 and requires Android 12 / API 31 or newer. Some validation was performed on Android 17 / HyperOS 4; this is not a claim of complete Android 17 API adoption or stable 120 Hz performance.
+| 搜索 / Search | 播放器 / Player |
+| --- | --- |
+| [<img src="docs/screenshots/search.jpg" width="240" alt="Search">](docs/screenshots/search.jpg) | [<img src="docs/screenshots/player.jpg" width="320" alt="Full player">](docs/screenshots/player.jpg) |
 
-## Build
+The screenshots show public podcast content and are included to document the
+interface. Podcast titles and cover artwork belong to their respective publishers.
+截图中的节目名称和封面仅用于展示界面，权利归原发布方所有。
 
-To continue development on another machine, clone the repository and read
-`AGENTS.md`. The `main` branch contains ongoing work. To start a branch from
-the exact 1.1 release, run:
+## Release / 版本
+
+- 当前版本 / Current release: **1.1.0**
+- Android 应用 ID / Application ID: `dev.podcast.nativeapp`
+- 版本代码 / Version code: `10100`
+- 最低系统 / Minimum Android: Android 12 (API 31)
+- 目标 SDK / Target SDK: 36
+- [下载 APK / Download APK](https://github.com/lljszzc/Castflow/releases/latest)
+
+## Features / 功能
+
+| English | 中文 |
+| --- | --- |
+| Browse featured content, categories, charts, shows, and episodes. | 浏览精选内容、分类、榜单、节目和单集。 |
+| Search podcast shows and episodes. | 搜索播客节目和单集。 |
+| Sign in through Apple's official web login. | 通过 Apple 官方网页登录。 |
+| Follow shows, save episodes, and resume recent playback. | 关注节目、保存单集，并从最近播放位置继续收听。 |
+| Play in the background with speed control, seeking, queue management, and sleep timers. | 后台播放，支持倍速、跳转、待播队列和睡眠定时。 |
+| Download episodes with an optional mobile-data preference. | 下载单集，并可限制使用移动数据。 |
+| Pin shows and arrange library categories. | 置顶节目，调整资料库分类。 |
+| Use predictive back with the full-player transition. | 使用系统预测性返回和完整播放器转场。 |
+
+## Build / 构建
+
+Requirements / 构建要求:
+
+- JDK 17
+- Android SDK Platform 36
+- Android SDK Build-Tools 35.0.0
+
+Set `JAVA_HOME` and `ANDROID_HOME`, or create an untracked
+`android-client/local.properties` with `sdk.dir`.
+设置 `JAVA_HOME` 和 `ANDROID_HOME`，或创建不提交到 Git 的
+`android-client/local.properties` 并填写 `sdk.dir`。
+
+```bash
+cd android-client
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+Windows:
+
+```powershell
+cd android-client
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+```
+
+`assemblePerformance` builds a minified APK signed with the local debug key.
+Signing keys are not included in the repository, so builds made on different
+machines use different signatures.
+
+`assemblePerformance` 会生成经过压缩的 APK，并使用本机 debug key 签名。仓库不包含
+签名文件，不同设备构建出的安装包签名不同。
+
+## Development / 开发
+
+The Android application is in `android-client`. Files under `verification/android`
+are an old login prototype and are not part of the released application.
+正式 Android 应用位于 `android-client`；`verification/android` 是旧的登录验证代码，
+不属于当前应用。
+
+To work from the exact 1.1.0 source:
 
 ```bash
 git clone https://github.com/lljszzc/Castflow.git
@@ -34,37 +108,66 @@ cd Castflow
 git switch -c work-from-1.1 v1.1.0
 ```
 
-Install JDK 17 and Android SDK platform 36 / build-tools 35.0.0. Set `JAVA_HOME` and `ANDROID_HOME` (or create an untracked `android-client/local.properties` containing `sdk.dir=...`).
+Read these files before changing behavior:
+
+- [Architecture / 架构](docs/ARCHITECTURE.md)
+- [API notes / API 说明](docs/API.md)
+- [Design and localization / 设计与本地化](docs/DESIGN.md)
+- [Security / 安全](SECURITY.md)
+- [Agent handoff / Agent 交接](AGENTS.md)
+
+Before pushing, inspect the staged files and run:
+
+```bash
+python tools/scan_secrets.py --staged
+```
+
+Android 17 cold-start and anomaly profiling uses a separate build:
 
 ```bash
 cd android-client
-./gradlew testDebugUnitTest lintDebug assembleDebug
-# Windows: .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+./gradlew assembleProfileLab
 ```
 
-`assemblePerformance` creates an optimized, non-debuggable development APK signed with the local Android debug key. A clean machine uses a different debug key; it cannot update an APK signed by another key. Signing keys are never included in this repository. No production signing infrastructure is configured.
+The diagnostic package ID is `dev.podcast.nativeapp.profilelab`. Run it signed out
+with test or public content. See [SECURITY.md](SECURITY.md) for the data-handling
+boundaries.
 
-For Android 17 cold-start and anomaly profiling, build `assembleProfileLab`.
-This creates a debuggable installation with the separate package ID
-`dev.podcast.nativeapp.profilelab`. Use it signed out with synthetic or public content.
-Launch once to register the triggers, then cold-start the lab app again. Use
-`adb logcat -s CastflowProfiles:I` for registration and result status and
-`adb shell run-as dev.podcast.nativeapp.profilelab ls files/profiling` to inspect local artifacts.
-Android controls sampling, rate limits and delivery. Debuggable lab timings can differ
-from the regular performance APK. Uninstall the lab package to clear its diagnostics.
+Android 17 冷启动与异常诊断使用独立构建，包名为
+`dev.podcast.nativeapp.profilelab`。应退出个人账号，只使用测试内容或公开内容。
 
-## Documentation
+## Privacy / 隐私
 
-- [Architecture and navigation](docs/ARCHITECTURE.md)
-- [API contracts and verification](docs/API.md)
-- [UI, motion and localization](docs/DESIGN.md)
-- [Security and publication boundaries](SECURITY.md)
-- [Agent maintenance instructions](AGENTS.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
+- Sign-in happens on Apple's HTTPS pages.
+- Passwords, cookies, and `media-user-token` values are not sent to a
+  developer-controlled backend.
+- Application backup is disabled.
+- Account credentials and private account responses must not be included in
+  issues, pull requests, screenshots, logs, or test fixtures.
+- Local tools, account captures, APKs, signing keys, and runtime databases are
+  excluded from Git.
 
-`verification/android` is a historical, source-only authentication spike, not the released application. Python probes are development tools; see [verification notes](docs/VERIFICATION.md) before running write tests. Captures, credentials, account responses, screenshots, SDKs, build outputs and signing keys are deliberately excluded.
+登录在 Apple 的 HTTPS 页面完成。密码、Cookie 和 `media-user-token` 不会发送到开发者
+控制的后端。应用数据备份已关闭。不要把账号凭据或私人账户响应放进 issue、pull
+request、截图、日志或测试数据。
 
-## License
+## Limitations / 限制
 
-MIT for project-authored code and artwork. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md). Apple Podcasts, Apple Music, Xiaomi and HyperOS names belong to their respective owners. External podcast artwork and media belong to their publishers and are fetched at runtime, not distributed as project assets.
+The Apple Podcasts API used by the app is undocumented and can change. The app does
+not currently support paid or protected media, transcripts, chapters, full channel
+pages, long-term authentication renewal, or cross-device progress conflict
+resolution.
+
+应用使用的 Apple Podcasts API 没有公开文档，可能随时变化。目前不支持付费或受保护
+媒体、文字稿、章节、完整频道页面、长期登录续期和跨设备播放进度冲突处理。
+
+This project is not affiliated with Apple, Xiaomi, or HyperOS. Podcast artwork and
+media belong to their publishers and are loaded from external services.
+本项目与 Apple、小米或 HyperOS 没有隶属关系。播客封面和音频归发布方所有。
+
+## License / 许可证
+
+Project code and original artwork use the MIT License. See [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+项目代码和原创图像使用 MIT License。第三方说明见
+[LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
