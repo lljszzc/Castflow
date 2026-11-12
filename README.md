@@ -25,20 +25,6 @@ The screenshots show public podcast content and are included to document the
 interface. Podcast titles and cover artwork belong to their respective publishers.
 截图中的节目名称和封面仅用于展示界面，权利归原发布方所有。
 
-## Screenshots / 界面截图
-
-| 主页 / Home | 节目详情 / Show | 资料库 / Library |
-| --- | --- | --- |
-| [<img src="docs/screenshots/home.jpg" width="240" alt="Home">](docs/screenshots/home.jpg) | [<img src="docs/screenshots/show.jpg" width="240" alt="Show details">](docs/screenshots/show.jpg) | [<img src="docs/screenshots/library.jpg" width="240" alt="Library">](docs/screenshots/library.jpg) |
-
-| 搜索 / Search | 播放器 / Player |
-| --- | --- |
-| [<img src="docs/screenshots/search.jpg" width="240" alt="Search">](docs/screenshots/search.jpg) | [<img src="docs/screenshots/player.jpg" width="320" alt="Full player">](docs/screenshots/player.jpg) |
-
-The screenshots show public podcast content and are included to document the
-interface. Podcast titles and cover artwork belong to their respective publishers.
-截图中的节目名称和封面仅用于展示界面，权利归原发布方所有。
-
 ## Release / 版本
 
 - 当前版本 / Current release: **1.1.0**
