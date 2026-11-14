@@ -15,15 +15,29 @@ import java.net.URLEncoder
 
 private val numericId = Regex("\\d+")
 
-data class PodcastItem(val id: String, val type: String, val title: String, val author: String, val artwork: String, val audio: String, val description: String, val duration: Long, val url: String = "")
+data class PodcastItem(val id: String, val type: String, val title: String, val author: String, val artwork: String, val audio: String, val description: String, val duration: Long, val url: String = "", val showId: String = "")
 data class EditorialSection(val id: String, val title: String, val items: List<PodcastItem>)
 data class BrowseCategory(val id: String, val title: String, val artwork: String, val route: String, val color: Long = 0xFFE9EDF4)
 fun JSONArray.items(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
+private fun JSONObject.relationshipId(name: String): String {
+    val related = optJSONObject("relationships")?.optJSONObject(name)?.opt("data")
+    return when (related) {
+        is JSONArray -> related.optJSONObject(0)?.optString("id").orEmpty()
+        is JSONObject -> related.optString("id")
+        else -> ""
+    }
+}
 fun JSONObject.item(): PodcastItem {
     val a = optJSONObject("attributes") ?: JSONObject()
+    val url = a.optString("url")
+    val showId = relationshipId("podcasts").ifBlank { relationshipId("podcast") }.ifBlank {
+        a.optString("podcastId")
+    }.ifBlank {
+        Regex("/id(\\d+)").find(url)?.groupValues?.getOrNull(1).orEmpty()
+    }
     return PodcastItem(optString("id"), optString("type"), a.optString("name"), a.optString("artistName"),
         a.optJSONObject("artwork")?.optString("url")?.replace("{w}","600")?.replace("{h}","600")?.replace("{f}","jpg") ?: "",
-        a.optString("assetUrl"), a.optJSONObject("description")?.optString("standard") ?: "", a.optLong("durationInMilliseconds"), a.optString("url"))
+        a.optString("assetUrl"), a.optJSONObject("description")?.optString("standard") ?: "", a.optLong("durationInMilliseconds"), url, showId)
 }
 class Api(private val userToken: () -> String?) {
     private val publicCache = object : LinkedHashMap<String,Pair<Long,JSONObject>>(8,.75f,true) {

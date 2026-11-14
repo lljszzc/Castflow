@@ -126,6 +126,9 @@
     <string name="ui_123">下载中 %s</string>
     <string name="ui_124">暂未载入：%s</string>
     <string name="ui_125">请求失败（%s）</string>
+    <string name="shortcut_search">搜尋</string>
+    <string name="shortcut_latest_episode">最新單集</string>
+    <string name="shortcut_recently_played">最近播放</string>
     <string name="category_00">一夜好眠</string>
     <string name="category_01">不同語言的 Podcast</string>
     <string name="category_02">休閒</string>

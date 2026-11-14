@@ -6,7 +6,7 @@ Read README.md, docs/ARCHITECTURE.md, docs/API.md, docs/DESIGN.md and SECURITY.m
 - Use JDK 17 and the checked-in Gradle 8.13 wrapper. Run testDebugUnitTest, lintDebug and the affected assemble task. Do not claim device validation from a successful build.
 - Keep credentials in the official login session. Never print, commit, screenshot or export cookies, media-user-token, passwords, bearer values or private account payloads. No secrets in fixtures or CI.
 - Never commit research/, reference/, .tooling/, outputs/, local.properties, keystores or runtime databases. Inspect the exact staged file list and run tools/scan_secrets.py --staged before pushing.
-- Preserve the applicationId dev.podcast.nativeapp for installed users. Version 1.1.0 uses versionCode 10100. Build with SDK platform 36 and build-tools 35.0.0.
+- Preserve the applicationId dev.podcast.nativeapp for installed users. Version 1.2.0 uses versionCode 10200. Build with SDK platform 36 and build-tools 35.0.0.
 - UI state keys are currently stable Chinese identifiers; translate at presentation boundaries, not by renaming persisted keys. Update values, values-zh and values-b+zh+Hant resources together. Podcast titles/authors retain their original language. Cache keys include language and an account digest.
 - Playback controls use MediaController events, not the position poll, for play/pause/buffering. System media cards must open the full player.
 - Keep motion restrained and non-bouncy for full-player transitions. Retain physical screen-corner adaptation, navigation insets and keyboard safety. Do not treat project timings as official Xiaomi constants.

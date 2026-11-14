@@ -27,9 +27,9 @@ interface. Podcast titles and cover artwork belong to their respective publisher
 
 ## Release / 版本
 
-- 当前版本 / Current release: **1.1.0**
+- 当前版本 / Current release: **1.2.0**
 - Android 应用 ID / Application ID: `dev.podcast.nativeapp`
-- 版本代码 / Version code: `10100`
+- 版本代码 / Version code: `10200`
 - 最低系统 / Minimum Android: Android 12 (API 31)
 - 目标 SDK / Target SDK: 36
 - [下载 APK / Download APK](https://github.com/lljszzc/Castflow/releases/latest)
@@ -42,10 +42,11 @@ interface. Podcast titles and cover artwork belong to their respective publisher
 | Search podcast shows and episodes. | 搜索播客节目和单集。 |
 | Sign in through Apple's official web login. | 通过 Apple 官方网页登录。 |
 | Follow shows, save episodes, and resume recent playback. | 关注节目、保存单集，并从最近播放位置继续收听。 |
-| Play in the background with speed control, seeking, queue management, and sleep timers. | 后台播放，支持倍速、跳转、待播队列和睡眠定时。 |
+| Play in the background with speed control, seeking, queue management, system next/previous controls, and sleep timers. | 后台播放，支持倍速、跳转、待播队列、系统上一集/下一集控制和睡眠定时。 |
+| Open Search, Latest Episodes, and Recently Played from launcher shortcuts. | 通过桌面快捷方式打开搜索、最新单集和最近播放。 |
 | Download episodes with an optional mobile-data preference. | 下载单集，并可限制使用移动数据。 |
 | Pin shows and arrange library categories. | 置顶节目，调整资料库分类。 |
-| Use predictive back with the full-player transition. | 使用系统预测性返回和完整播放器转场。 |
+| Use predictive back, responsive artwork sizing, and slow marquee titles in the full player. | 完整播放器支持预测性返回、随播放状态缩放封面和长标题慢速滚动。 |
 
 ## Build / 构建
 
@@ -86,12 +87,12 @@ are an old login prototype and are not part of the released application.
 正式 Android 应用位于 `android-client`；`verification/android` 是旧的登录验证代码，
 不属于当前应用。
 
-To work from the exact 1.1.0 source:
+To work from the exact 1.2.0 source:
 
 ```bash
 git clone https://github.com/lljszzc/Castflow.git
 cd Castflow
-git switch -c work-from-1.1 v1.1.0
+git switch -c work-from-1.2 v1.2.0
 ```
 
 Read these files before changing behavior:

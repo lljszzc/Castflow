@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
@@ -65,6 +66,11 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
     val coverDp = minOf((widthDp - 60.dp).coerceAtLeast(0.dp) * .88f,
         heightDp * if (shortLayout) .23f else .43f)
     val coverSide = with(density) { coverDp.toPx() }
+    val coverScale by animateFloatAsState(
+        targetValue = if (playing) 1.035f else .965f,
+        animationSpec = tween(480, easing = MotionTokens.enter),
+        label = "playbackCoverScale"
+    )
     val nativeInsets = androidx.compose.ui.platform.LocalView.current.rootWindowInsets
     val fallbackRadius = with(density) { 32.dp.toPx() }
     val cornerRadii = remember(nativeInsets) { (0..3).map { nativeInsets?.getRoundedCorner(it)?.radius?.toFloat() ?: fallbackRadius } }
@@ -121,6 +127,8 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
     val collapsed = ((offset.value + dragOffset) / heightPx).coerceIn(0f,1f)
     val expanded = 1f - collapsed
     Box(Modifier.fillMaxSize()) {
+    // Keep the rounded transition, then fill the rectangular capture bounds once expanded.
+    Box(Modifier.fillMaxSize().background(background.copy(alpha = ((expanded - .92f) / .08f).coerceIn(0f,1f))))
     Box(Modifier.fillMaxSize().graphicsLayer {
         alpha = (expanded / .18f).coerceIn(0f,1f)
         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f,0f)
@@ -156,11 +164,34 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
                 Column(Modifier.fillMaxWidth().weight(1f).then(
                     if (shortLayout) Modifier.verticalScroll(rememberScrollState()) else Modifier
                 ), verticalArrangement = if (shortLayout) Arrangement.Top else Arrangement.Bottom) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { androidx.compose.material3.Text(item.title, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis); androidx.compose.material3.Text(item.author, fontSize = 20.sp, color = palette.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                        SoftIconButton(onSave, Modifier.background(palette.foreground.copy(alpha = .12f), RoundedCornerShape(50))) { LocalizedIcon(Icons.Rounded.StarOutline, "保存单集") }
-                        Box { SoftIconButton(onClick = { menu = true }) { LocalizedIcon(Icons.Rounded.MoreVert, "更多播放操作") }
-                            if(menu) GlassMenu(listOf("播放速度" to { speed = true }, "睡眠定时" to { sleep = true }), { menu = false })
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            var titleOverflows by remember(item.id, item.title, coverDp) { mutableStateOf(false) }
+                            Box {
+                                androidx.compose.material3.Text(
+                                    item.title,
+                                    modifier = Modifier.fillMaxWidth().then(
+                                        if (titleOverflows) Modifier.basicMarquee(initialDelayMillis = 1_400, repeatDelayMillis = 2_000, velocity = 18.dp)
+                                        else Modifier
+                                    ),
+                                    fontSize = 22.sp,
+                                    lineHeight = 27.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = if (titleOverflows) 1 else 2,
+                                    softWrap = !titleOverflows,
+                                    overflow = if (titleOverflows) TextOverflow.Clip else TextOverflow.Ellipsis,
+                                    onTextLayout = { if (!titleOverflows) titleOverflows = it.hasVisualOverflow }
+                                )
+                            }
+                            androidx.compose.material3.Text(item.author, fontSize = 20.sp, color = palette.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        // Offset the fixed action group by the trailing icon's optical inset.
+                        Row(Modifier.offset(x = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SoftIconButton(onSave, Modifier.background(palette.foreground.copy(alpha = .12f), RoundedCornerShape(50))) { LocalizedIcon(Icons.Rounded.StarOutline, "保存单集") }
+                            Box { SoftIconButton(onClick = { menu = true }) { LocalizedIcon(Icons.Rounded.MoreVert, "更多播放操作") }
+                                if(menu) GlassMenu(listOf("播放速度" to { speed = true }, "睡眠定时" to { sleep = true }), { menu = false })
+                            }
                         }
                     }
                     Spacer(Modifier.height(20.dp))
@@ -181,13 +212,15 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
     }
     // The artwork stays visible and travels to the real mini-player cover instead of fading away.
     val miniSide = with(density) { 29.dp.toPx() }
-    val coverX = (screenWidth-coverSide)/2f
-    val coverY = statusHeight + with(density) { 70.dp.toPx() }
+    val fullCoverSide = coverSide * coverScale
+    val fullCoverCenterY = statusHeight + with(density) { 70.dp.toPx() } + coverSide / 2f
+    val fullCoverX = (screenWidth-fullCoverSide)/2f
+    val fullCoverY = fullCoverCenterY-fullCoverSide/2f
     val miniX = source.left + with(density) { 11.dp.toPx() }
     val miniY = source.top + (source.height-miniSide)/2f
-    val side = coverSide + (miniSide-coverSide)*collapsed
+    val side = fullCoverSide + (miniSide-fullCoverSide)*collapsed
     AsyncImage(remember(item.artwork) { coil.request.ImageRequest.Builder(context).data(item.artwork).size(900).crossfade(false).build() },item.title,Modifier
-        .offset { androidx.compose.ui.unit.IntOffset((coverX+(miniX-coverX)*collapsed).toInt(),(coverY+(miniY-coverY)*collapsed).toInt()) }
+        .offset { androidx.compose.ui.unit.IntOffset((fullCoverX+(miniX-fullCoverX)*collapsed).toInt(),(fullCoverY+(miniY-fullCoverY)*collapsed).toInt()) }
         .size(with(density) { side.toDp() })
         .clip(RoundedCornerShape((15f-8f*collapsed).dp)))
     }

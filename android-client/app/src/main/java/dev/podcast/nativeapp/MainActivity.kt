@@ -56,16 +56,25 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var playerRequest by mutableIntStateOf(0)
+    private var shortcutRequest by mutableIntStateOf(0)
+    private var shortcutDestination by mutableStateOf<ShortcutDestination?>(null)
+    private fun acceptIntent(intent: android.content.Intent) {
+        if(intent.action == "dev.podcast.OPEN_PLAYER") playerRequest++
+        ShortcutDestination.fromAction(intent.action)?.let {
+            shortcutDestination = it
+            shortcutRequest++
+        }
+    }
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if(intent.action == "dev.podcast.OPEN_PLAYER") playerRequest++
+        acceptIntent(intent)
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if(intent.action == "dev.podcast.OPEN_PLAYER") playerRequest++
+        acceptIntent(intent)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
-        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF008CFF), background = Color.White)) { CompositionLocalProvider(LocalGlassState provides remember { HazeState() }) { PodcastApp(playerRequest) } } }
+        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF008CFF), background = Color.White)) { CompositionLocalProvider(LocalGlassState provides remember { HazeState() }) { PodcastApp(playerRequest, shortcutDestination, shortcutRequest) } } }
     }
 }
 data class CachedPage(val rows: List<PodcastItem>, val shelves: List<EditorialSection>, val categories: List<BrowseCategory>, val warning: String, val cursors: List<String>, val time: Long = android.os.SystemClock.elapsedRealtime())
@@ -87,7 +96,7 @@ private object PageMemory {
 private fun sessionToken(): String? = CookieManager.getInstance().getCookie("https://podcasts.apple.com")?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("media-user-token=") }?.substringAfter('=')
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun PodcastApp(playerRequest: Int = 0) {
+@Composable internal fun PodcastApp(playerRequest: Int = 0, shortcutDestination: ShortcutDestination? = null, shortcutRequest: Int = 0) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val api = remember { Api(::sessionToken) }
@@ -112,8 +121,8 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     val downloads = remember { Downloads(context.applicationContext) }
     val progress = remember { ProgressStore(context.applicationContext) }
     var signedIn by remember { mutableStateOf(sessionToken() != null) }
-    var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("主页") }
-    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("概览") }
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(shortcutDestination?.tab ?: "主页") }
+    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(shortcutDestination?.section ?: "概览") }
     val libraryPreferences = remember { LibraryPreferences(context) }
     var layoutRevision by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
@@ -133,6 +142,18 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     var miniPlayerBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var fullPlayer by remember { mutableStateOf(false) }
     LaunchedEffect(playerRequest) { if(playerRequest > 0) fullPlayer = true }
+    LaunchedEffect(shortcutRequest) {
+        if(shortcutRequest > 0) shortcutDestination?.let { destination ->
+            auth = false
+            fullPlayer = false
+            detail = null
+            episodeInfo = null
+            browseCategory = null
+            query = ""
+            tab = destination.tab
+            section = destination.section
+        }
+    }
     var playerCoversBars by remember { mutableStateOf(false) }
     var queue by remember { mutableStateOf(false) }
     var queueRefresh by remember { mutableIntStateOf(0) }
@@ -285,7 +306,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         if (tab == "搜索" && query.isNotBlank() && detail == null) delay(350)
         load()
     }
-    fun play(item: PodcastItem, enqueue: Boolean = false) {
+    fun play(item: PodcastItem, enqueue: Boolean = false, queueItems: List<PodcastItem> = emptyList()) {
         val request = if(enqueue) playbackRequest else ++playbackRequest
         if(!enqueue) pendingPlayback = item
         scope.launch {
@@ -294,12 +315,21 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
             if(!enqueue && request != playbackRequest) return@launch
             if (ep.audio.isBlank()) { if(!enqueue && request == playbackRequest) pendingPlayback = null; snackbar.showLocalizedSnackbar("本单集未提供可用的公开音频"); return@launch }
             val controller = player ?: run { if(!enqueue && request == playbackRequest) pendingPlayback = null; snackbar.showLocalizedSnackbar("播放器正在连接，请重试"); return@launch }
-            val media = MediaItem.Builder().setMediaId(ep.id).setUri(ep.audio).setMediaMetadata(MediaMetadata.Builder().setTitle(ep.title).setArtist(ep.author).setArtworkUri(ep.artwork.toUri()).build()).build()
+            fun media(item: PodcastItem) = MediaItem.Builder().setMediaId(item.id).setUri(item.audio).setMediaMetadata(MediaMetadata.Builder().setTitle(item.title).setArtist(item.author).setArtworkUri(item.artwork.toUri()).build()).build()
+            val media = media(ep)
             if (enqueue) { controller.addMediaItem(media); if(controller.mediaItemCount == 1) controller.prepare(); snackbar.showLocalizedSnackbar("已加入待播列表"); return@launch }
             val resume = kotlinx.coroutines.withTimeout(30000) { progress.resume(ep.id,api,signedIn) }
             if(request != playbackRequest) return@launch
             current = ep
-            controller.setMediaItem(media, resume)
+            val contextualQueue = if(queueItems.none { it.id == ep.id } && ep.showId.isNotBlank()) {
+                try { api.episodes(ep.showId) }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { emptyList() }
+            } else queueItems
+            if(request != playbackRequest) return@launch
+            val playbackQueue = buildPlaybackQueue(ep, contextualQueue)
+            val currentIndex = playbackQueue.indexOfFirst { it.id == ep.id }.coerceAtLeast(0)
+            controller.setMediaItems(playbackQueue.map(::media), currentIndex, resume)
             controller.prepare(); controller.setPlaybackSpeed(libraryPreferences.prefs.getFloat("speed",1f)); controller.play()
         } catch (e: Exception) {
             if(e is kotlinx.coroutines.CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
@@ -349,7 +379,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                 androidx.compose.material3.Text(show.author, fontSize = 20.sp, color = detailColors.secondary)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SoftIconButton(onClick = { libraryPreferences.togglePin(show); layoutRevision++ }) { LocalizedIcon(if(libraryPreferences.pins().any { it.id == show.id }) Icons.Rounded.PushPin else Icons.Rounded.Add, "置顶") }
-                    SoftFilledButton(onClick = { rows.firstOrNull()?.let { play(it) } }, enabled = rows.isNotEmpty() && rows.first().type == "podcast-episodes", modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
+                    SoftFilledButton(onClick = { rows.firstOrNull()?.let { play(it, queueItems = rows) } }, enabled = rows.isNotEmpty() && rows.first().type == "podcast-episodes", modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
                     SoftIconButton(onClick = { update(show, true) }) { LocalizedIcon(Icons.Rounded.AddCircleOutline, "关注节目") }
                 }
                 var expanded by remember(show.id) { mutableStateOf(false) }
@@ -405,7 +435,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                 Column(Modifier.animateItem(fadeInSpec = tween(180),fadeOutSpec = tween(120),placementSpec = tween(240))) { Row(Modifier.fillMaxWidth().glassTap { if (item.type == "podcasts") detail = item else episodeInfo = item }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Artwork(item, 70)
                     Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { androidx.compose.material3.Text(item.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis); androidx.compose.material3.Text(item.author, fontSize = 13.sp, color = if(detail != null) detailColors.secondary else Color.Gray, maxLines = 1) }
-                    if (item.type != "podcasts") SoftIconButton(onClick = { play(item) }) { LocalizedIcon(Icons.Rounded.PlayCircle, "播放", tint = if(detail != null) ink else MaterialTheme.colorScheme.primary) }
+                    if (item.type != "podcasts") SoftIconButton(onClick = { play(item, queueItems = if(detail != null) rows else emptyList()) }) { LocalizedIcon(Icons.Rounded.PlayCircle, "播放", tint = if(detail != null) ink else MaterialTheme.colorScheme.primary) }
                     if(item.type != "podcasts") Box {
                         var actions by remember(item.id) { mutableStateOf(false) }
                         SoftIconButton(onClick = { actions = true }) { LocalizedIcon(Icons.Rounded.MoreVert, "单集操作", tint = ink) }
@@ -429,7 +459,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
             } }) { LocalizedText("加载更多") } }
         }
     }
-    episodeInfo?.let { item -> EpisodeDetails(item, api, { episodeInfo = null }, { play(it) }, { update(it,true) }, { play(it,true) }, { downloadItem(it) }, { ep, complete ->
+    episodeInfo?.let { item -> EpisodeDetails(item, api, { episodeInfo = null }, { play(it, queueItems = if(detail != null) rows else emptyList()) }, { update(it,true) }, { play(it,true) }, { downloadItem(it) }, { ep, complete ->
         if(!signedIn) auth = true else scope.launch {
             try { api.savePosition(ep.id, if(complete) ep.duration.coerceAtLeast(0) else 0, complete, java.time.Instant.now().toString()); snackbar.showLocalizedSnackbar("播放状态已更新"); refresh++ }
             catch(e: Exception) { snackbar.showLocalizedSnackbar(e.message ?: "更新失败") }

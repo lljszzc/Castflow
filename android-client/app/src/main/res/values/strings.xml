@@ -126,6 +126,9 @@
     <string name="ui_123">Downloading %s</string>
     <string name="ui_124">Could not load: %s</string>
     <string name="ui_125">Request failed (%s)</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_latest_episode">Latest Episode</string>
+    <string name="shortcut_recently_played">Recently Played</string>
     <string name="category_00">Sleep Well</string>
     <string name="category_01">Podcasts in Other Languages</string>
     <string name="category_02">Leisure</string>

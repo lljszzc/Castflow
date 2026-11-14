@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "dev.podcast.nativeapp"
     compileSdk = 36
-    defaultConfig { applicationId = "dev.podcast.nativeapp"; minSdk = 31; targetSdk = 36; versionCode = 10100; versionName = "1.1.0" }
+    defaultConfig { applicationId = "dev.podcast.nativeapp"; minSdk = 31; targetSdk = 36; versionCode = 10200; versionName = "1.2.0" }
     buildTypes {
         create("performance") {
             initWith(getByName("release"))
@@ -29,7 +29,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     implementation("dev.chrisbanes.haze:haze:1.3.1")
-    implementation("androidx.palette:palette:1.1.0")
+    implementation("androidx.palette:palette-ktx:1.1.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
