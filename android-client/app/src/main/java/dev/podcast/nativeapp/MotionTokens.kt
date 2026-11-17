@@ -5,9 +5,17 @@ import androidx.compose.animation.core.*
 object MotionTokens {
     val enter = CubicBezierEasing(.18f,.78f,.22f,1f)
     val exit = CubicBezierEasing(.35f,0f,.18f,1f)
+    fun page() = tween<Float>(240, easing = enter)
     fun playerEnter() = tween<Float>(460,easing = enter)
     fun playerExit() = tween<Float>(620, easing = FastOutSlowInEasing)
     fun recover() = tween<Float>(270,easing = FastOutSlowInEasing)
     fun press() = tween<Float>(160,easing = FastOutSlowInEasing)
     const val pressedScale = .97f
 }
+
+internal data class NavigationMotionKey(
+    val tab: String,
+    val section: String,
+    val categoryId: String?,
+    val detailId: String?
+)

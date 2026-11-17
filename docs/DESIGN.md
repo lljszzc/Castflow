@@ -4,6 +4,8 @@ Brand: 听见 / Castflow. Approved icon is the red glass podcast broadcaster, di
 
 Content is readable and spacious; navigation/control layers use Haze backdrop blur, translucent tint, rounded surfaces and restrained shadows. Share button feedback rather than introducing stock rectangular ripple artifacts. Full-player transitions are nonlinear without bounce. Artwork remains visible while moving to the mini-player position. MotionTokens contains project-tuned parameters, not official vendor specifications.
 
+Page-depth changes use a restrained fade and vertical settle, including search categories, show details, Home and Discovery. Main scrolling surfaces draw edge to edge behind the transparent status bar; keep the initial safe top as scrolling content padding instead of a fixed white inset.
+
 Long full-player titles stay at two lines when they fit. Overflow titles use a one-line slow marquee instead of permanently hiding the remainder. Artwork responds to playback state with a restrained center-anchored scale, and the title/action row uses optical rather than equal-gap centering.
 
 Read RoundedCorner radii and navigation/safe-drawing insets; keep bottom controls away from large physical corners even with a hidden gesture indicator. Status-bar appearance must observe actual layer coverage, with Compose state read during composition or snapshotFlow. Do not read animation state only inside SideEffect and assume it triggers recomposition.

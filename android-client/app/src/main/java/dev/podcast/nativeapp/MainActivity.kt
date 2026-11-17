@@ -201,8 +201,8 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     val detailColors = rememberArtworkColors(detail?.artwork ?: "")
     val bg by animateColorAsState(if (detail != null) detailColors.background else Color.White, label = "coverBackground")
     val ink = if(bg.luminance() > .179f) Color.Black else Color.White
-    val pageMotion = remember { androidx.compose.animation.core.Animatable(1f) }
-    LaunchedEffect(tab,section,detail?.id) { pageMotion.snapTo(0f); pageMotion.animateTo(1f,spring(dampingRatio = 1f,stiffness = 500f)) }
+    val pageMotionKey = NavigationMotionKey(tab, section, browseCategory?.id, detail?.id)
+    val pageEntranceOffset = with(LocalDensity.current) { 10.dp.toPx() }
     var loadedPage by remember { mutableStateOf("") }
     DisposableEffect(Unit) {
         val future = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
@@ -348,12 +348,13 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     } }
     val lightStatusIcons = auth || (!playerCoversBars && bg.luminance() > .179f)
     val lightNavigationIcons = auth || !fullPlayer
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     SideEffect {
         val activity = context as? android.app.Activity
         activity?.let { androidx.core.view.WindowCompat.getInsetsController(it.window,it.window.decorView).apply { isAppearanceLightStatusBars = lightStatusIcons; isAppearanceLightNavigationBars = lightNavigationIcons } }
     }
     Box(Modifier.fillMaxSize()) {
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = bg, contentColor = ink,
+    Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = bg, contentColor = ink, contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             BottomDock(compact, tab, pendingPlayback ?: current, playing, playbackLoading,
                 onTab = { tab = it; detail = null; browseCategory = null; section = "概览" },
@@ -361,7 +362,16 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                 onToggle = { player?.run { if(playWhenReady) pause() else { if(playbackState == androidx.media3.common.Player.STATE_IDLE) prepare(); play() } } },
                 onNext = { player?.seekToNextMediaItem() }, onPlayerBounds = { miniPlayerBounds = it })
         }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().graphicsLayer { alpha = pageMotion.value; translationX = (1f-pageMotion.value)*36f }.padding(top = padding.calculateTopPadding()).hazeSource(LocalGlassState.current).background(bg).nestedScroll(scrollIntent), state = listState, contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 200.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        key(pageMotionKey) {
+        val pageMotion = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(Unit) { pageMotion.animateTo(1f, MotionTokens.page()) }
+        LazyColumn(Modifier.fillMaxSize().graphicsLayer {
+            val progress = pageMotion.value
+            alpha = .72f + .28f * progress
+            translationY = (1f - progress) * pageEntranceOffset
+            scaleX = .994f + .006f * progress
+            scaleY = scaleX
+        }.hazeSource(LocalGlassState.current).background(bg).nestedScroll(scrollIntent), state = listState, contentPadding = PaddingValues(start = 22.dp, top = statusBarTop, end = 22.dp, bottom = (padding.calculateBottomPadding() + 92.dp).coerceAtLeast(200.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item { Row(Modifier.fillMaxWidth().padding(top = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) SoftIconButton(onClick = { if (detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "资料库") section = "概览" else { tab = "新发现"; section = "概览" } }) { LocalizedIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
                 LocalizedText(if(detail != null) "" else browseCategory?.title ?: tab, Modifier.weight(1f), fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2)
@@ -457,6 +467,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                 catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; snackbar.showLocalizedSnackbar(e.message ?: "加载下一页失败") }
                 finally { loading = false }
             } }) { LocalizedText("加载更多") } }
+        }
         }
     }
     episodeInfo?.let { item -> EpisodeDetails(item, api, { episodeInfo = null }, { play(it, queueItems = if(detail != null) rows else emptyList()) }, { update(it,true) }, { play(it,true) }, { downloadItem(it) }, { ep, complete ->

@@ -18,6 +18,18 @@ private val numericId = Regex("\\d+")
 data class PodcastItem(val id: String, val type: String, val title: String, val author: String, val artwork: String, val audio: String, val description: String, val duration: Long, val url: String = "", val showId: String = "")
 data class EditorialSection(val id: String, val title: String, val items: List<PodcastItem>)
 data class BrowseCategory(val id: String, val title: String, val artwork: String, val route: String, val color: Long = 0xFFE9EDF4)
+internal fun withEditorialWebContext(path: String, language: String): String {
+    if (!path.startsWith("/v1/editorial/")) return path
+    val query = path.substringAfter('?', "")
+    val names = query.split('&').filter { it.isNotBlank() }.map { it.substringBefore('=') }.toSet()
+    val additions = buildList {
+        if ("platform" !in names) add("platform=web")
+        if ("l" !in names) add("l=${URLEncoder.encode(language, "UTF-8")}")
+    }
+    if (additions.isEmpty()) return path
+    val separator = if ('?' in path) "&" else "?"
+    return path + separator + additions.joinToString("&")
+}
 fun JSONArray.items(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
 private fun JSONObject.relationshipId(name: String): String {
     val related = optJSONObject("relationships")?.optJSONObject(name)?.opt("data")
@@ -186,8 +198,8 @@ class Api(private val userToken: () -> String?) {
                     val route = when {
                         uri.path?.contains("top-charts") == true -> "charts:26"
                         uri.path?.contains("viewGenre") == true && id != null -> "charts:$id"
-                        uri.path?.contains("viewGrouping") == true && id != null -> "/v1/editorial/$storefront/groupings/$id"
-                        uri.path?.contains("viewMultiRoom") == true && id != null -> "/v1/editorial/$storefront/multirooms/$id"
+                        uri.path?.contains("viewGrouping") == true && id != null -> withEditorialWebContext("/v1/editorial/$storefront/groupings/$id", contentLanguage())
+                        uri.path?.contains("viewMultiRoom") == true && id != null -> withEditorialWebContext("/v1/editorial/$storefront/multirooms/$id", contentLanguage())
                         else -> null
                     }
                     if(route != null) {
@@ -205,7 +217,7 @@ class Api(private val userToken: () -> String?) {
     }
     suspend fun category(category: BrowseCategory): List<PodcastItem> {
         if(category.route.startsWith("charts:")) return charts(genre = category.route.substringAfter(':'))
-        val payload = request(category.route)
+        val payload = request(withEditorialWebContext(category.route, contentLanguage()))
         val found = linkedMapOf<String,PodcastItem>()
         fun walk(x: Any?) { when(x) {
             is JSONObject -> { if(x.optString("type") in setOf("podcasts","podcast-episodes") && x.optJSONObject("attributes")?.has("name") == true) { val item = x.item(); found[item.type+item.id] = item }; x.keys().forEach { walk(x.opt(it)) } }

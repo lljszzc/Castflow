@@ -21,4 +21,6 @@ Host: https://amp-api.podcasts.apple.com. Public authorization is discovered fro
 
 Pagination may expose multiple next links; preserve pending cursors. Write paths are singletons, not query-id collections. Position attributes include positionInMilliseconds, completed and recordedAtTimestamp. Respect account storefront and provider access restrictions. An attempted generic recommendations endpoint was unavailable; do not replace personalized recommendations with charts under a misleading label.
 
+Editorial detail routes require web context. A grouping detail such as `/v1/editorial/{storefront}/groupings/{id}` returns 400 unless `platform=web` and a content language are supplied. Preserve the same context when normalizing cached category routes.
+
 Tests do not prove future endpoint availability. Revalidate changes with an authorized account without checking responses or tokens into git.

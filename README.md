@@ -27,9 +27,9 @@ interface. Podcast titles and cover artwork belong to their respective publisher
 
 ## Release / 版本
 
-- 当前版本 / Current release: **1.2.0**
+- 当前版本 / Current release: **1.2.1**
 - Android 应用 ID / Application ID: `dev.podcast.nativeapp`
-- 版本代码 / Version code: `10200`
+- 版本代码 / Version code: `10201`
 - 最低系统 / Minimum Android: Android 12 (API 31)
 - 目标 SDK / Target SDK: 36
 - [下载 APK / Download APK](https://github.com/lljszzc/Castflow/releases/latest)
