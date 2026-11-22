@@ -31,6 +31,7 @@ class LibraryPreferences(context: Context) {
     fun togglePin(item: PodcastItem) { val current = pins(); pins(if (current.any { it.id == item.id }) current.filterNot { it.id == item.id } else current + item) }
 }
 @Composable fun LibraryHubHeader(preferences: LibraryPreferences, revision: Int, onCategory: (String) -> Unit, onShow: (PodcastItem) -> Unit) {
+    val colors = CastflowTokens.colors
     val pins = remember(revision) { preferences.pins() }
     Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         pins.chunked(3).forEach { group -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -43,19 +44,20 @@ class LibraryPreferences(context: Context) {
             Row(Modifier.fillMaxWidth().glassTap { onCategory(name) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 LocalizedIcon(when(name) { "已保存" -> Icons.Rounded.BookmarkBorder; "下载" -> Icons.Rounded.Download; "最近播放" -> Icons.Rounded.History; "最新单集" -> Icons.Rounded.NewReleases; else -> Icons.Rounded.LibraryMusic }, null, Modifier.size(28.dp))
                 LocalizedText(name, Modifier.weight(1f).padding(start = 16.dp), fontSize = 22.sp)
-                LocalizedIcon(Icons.Rounded.ChevronRight, null, tint = Color.Gray)
+                LocalizedIcon(Icons.Rounded.ChevronRight, null, tint = colors.secondaryText)
             }
-            HorizontalDivider(Modifier.padding(start = 44.dp), color = Color.Black.copy(alpha = .12f))
+            HorizontalDivider(Modifier.padding(start = 44.dp), color = colors.dividerStrong)
         }
         LocalizedText("最近添加", Modifier.padding(top = 20.dp), fontSize = 26.sp, fontWeight = FontWeight.Bold)
     }
 }
 @Composable fun LibraryGridRow(group: List<PodcastItem>, onShow: (PodcastItem) -> Unit) {
+    val colors = CastflowTokens.colors
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         group.forEach { item -> Column(Modifier.weight(1f).glassTap { onShow(item) }) {
             AsyncImage(item.artwork, item.title, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)))
             androidx.compose.material3.Text(item.title, Modifier.padding(top = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp)
-            androidx.compose.material3.Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = Color.Gray)
+            androidx.compose.material3.Text(item.author, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = colors.secondaryText)
         } }; if(group.size == 1) Spacer(Modifier.weight(1f))
     }
 }

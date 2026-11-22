@@ -7,6 +7,7 @@
 - PageDiskCache.kt: display-only JSON, atomic writes, account-digest filenames, language-specific page keys, 24-page bound and seven-day expiry. No credentials or audio URLs in snapshots. The OS may evict the cache.
 - BottomDock.kt / FullPlayer.kt: native glass navigation/mini-player and player gestures. The cover travels between full and mini geometry, scales with playback state, and shortens overflowing titles to a slow marquee. Corner radii come from WindowInsets.
 - Materials.kt, GlassInteraction.kt, GlassMenu.kt, SoftOptions.kt, MoreMenuButton.kt, MotionTokens.kt: shared rendering and feedback.
+- ThemeSettings.kt / CastflowTheme.kt: local system/light/dark preference and fixed light, dark-gray, and OLED-black tokens. Appearance does not use dynamic Material You colors.
 - LibraryPreferences.kt: stable local categories/pins. UiStrings.kt / LocalizedComponents.kt: presentation-only resource adaptation; known server-provided category headings have English mappings.
 
 Preferences, cookies, downloads and cache belong to the installed app sandbox. They are not part of a build or release artifact. The project uses no developer-controlled backend.

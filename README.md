@@ -27,9 +27,9 @@ interface. Podcast titles and cover artwork belong to their respective publisher
 
 ## Release / 版本
 
-- 当前版本 / Current release: **1.2.1**
+- 当前版本 / Current release: **1.2.2**
 - Android 应用 ID / Application ID: `dev.podcast.nativeapp`
-- 版本代码 / Version code: `10201`
+- 版本代码 / Version code: `10202`
 - 最低系统 / Minimum Android: Android 12 (API 31)
 - 目标 SDK / Target SDK: 36
 - [下载 APK / Download APK](https://github.com/lljszzc/Castflow/releases/latest)
@@ -47,6 +47,7 @@ interface. Podcast titles and cover artwork belong to their respective publisher
 | Download episodes with an optional mobile-data preference. | 下载单集，并可限制使用移动数据。 |
 | Pin shows and arrange library categories. | 置顶节目，调整资料库分类。 |
 | Use predictive back, responsive artwork sizing, and slow marquee titles in the full player. | 完整播放器支持预测性返回、随播放状态缩放封面和长标题慢速滚动。 |
+| Follow the system theme or choose light, dark gray, or OLED black manually. | 跟随系统主题，或手动选择浅色、深灰色和 OLED 纯黑。 |
 
 ## Build / 构建
 

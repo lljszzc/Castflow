@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "dev.podcast.nativeapp"
     compileSdk = 36
-    defaultConfig { applicationId = "dev.podcast.nativeapp"; minSdk = 31; targetSdk = 36; versionCode = 10201; versionName = "1.2.1" }
+    defaultConfig { applicationId = "dev.podcast.nativeapp"; minSdk = 31; targetSdk = 36; versionCode = 10202; versionName = "1.2.2" }
     buildTypes {
         create("performance") {
             initWith(getByName("release"))

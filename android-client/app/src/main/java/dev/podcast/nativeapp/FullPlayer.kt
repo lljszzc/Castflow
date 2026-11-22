@@ -35,6 +35,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -47,8 +48,13 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
 @Composable fun FullPlayer(item: PodcastItem, playing: Boolean, loading: Boolean, player: Player?,
     onDismiss: () -> Unit, onToggle: () -> Unit, onSeek: (Long) -> Unit, onSpeed: (Float) -> Unit,
     sourceBounds: androidx.compose.ui.geometry.Rect?, onQueue: () -> Unit, onSave: () -> Unit, onSleep: (Int) -> Unit, onStatusCoverage: (Boolean) -> Unit) {
+    val theme = CastflowTokens.colors
     val extracted = rememberArtworkColors(item.artwork)
-    val palette = extracted.copy(background = extracted.playerBackground, foreground = Color.White)
+    val palette = if (theme.isDark) {
+        ArtworkColors(theme.playerBackground, Color.White, theme.playerBackground)
+    } else {
+        extracted.copy(background = extracted.playerBackground, foreground = Color.White)
+    }
     val context = LocalContext.current
     val background by animateColorAsState(palette.background.copy(alpha = 1f), label = "playerBackdrop")
     var menu by remember { mutableStateOf(false) }
@@ -156,7 +162,7 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
                     if (PlayerGesturePolicy.dismiss(dragOffset,heightPx,velocity.calculateVelocity().y)) closePlayer() else recoverPlayer()
                 }
             }, onDragCancel = { if (!closing && !trackingBack) recoverPlayer() })
-        }, color = androidx.compose.ui.graphics.lerp(Color(0xFFF2F2F5),background,expanded), contentColor = palette.foreground) {
+        }, color = androidx.compose.ui.graphics.lerp(theme.elevated,background,expanded), contentColor = palette.foreground) {
             Column(Modifier.fillMaxSize().graphicsLayer { alpha = expanded*expanded }.systemBarsPadding().padding(horizontal = 30.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.fillMaxWidth().height(48.dp).semantics { contentDescription = closeLabel }.glassTap { closePlayer() }, contentAlignment = Alignment.Center) { Box(Modifier.size(48.dp,4.dp).clip(RoundedCornerShape(4.dp)).background(palette.foreground.copy(alpha = .4f))) }
                 Spacer(Modifier.height(22.dp))
@@ -170,7 +176,7 @@ private fun clock(ms: Long): String { val total = ms.coerceAtLeast(0) / 1000; re
                             Box {
                                 androidx.compose.material3.Text(
                                     item.title,
-                                    modifier = Modifier.fillMaxWidth().then(
+                                    modifier = Modifier.fillMaxWidth().clipToBounds().then(
                                         if (titleOverflows) Modifier.basicMarquee(initialDelayMillis = 1_400, repeatDelayMillis = 2_000, velocity = 18.dp)
                                         else Modifier
                                     ),

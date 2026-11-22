@@ -21,7 +21,9 @@ import coil.compose.AsyncImage
     var error by remember(initial.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(initial.id) { try { val details = api.episode(initial.id)
         item = if (initial.audio.startsWith("content://")) details.copy(audio = initial.audio) else details } catch(e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = "详细介绍暂时无法加载" } }
-    val colors = rememberArtworkColors(item.artwork)
+    val theme = CastflowTokens.colors
+    val artworkColors = rememberArtworkColors(item.artwork)
+    val colors = if (theme.isDark) ArtworkColors(theme.background, theme.text, theme.playerBackground) else artworkColors
     val context = LocalContext.current
     SoftSheet(onDismissRequest = onDismiss, containerColor = colors.background, contentColor = colors.foreground) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {

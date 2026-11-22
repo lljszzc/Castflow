@@ -15,6 +15,7 @@ import androidx.compose.ui.window.*
 import kotlinx.coroutines.launch
 
 @Composable fun GlassMenu(actions: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit) {
+    val colors = CastflowTokens.colors
     val offsetY = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.roundToPx() }
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -41,9 +42,9 @@ import kotlinx.coroutines.launch
         }) { Column(Modifier.padding(6.dp)) {
             actions.forEachIndexed { index, (title, action) ->
                 LocalizedText(title, modifier = Modifier.fillMaxWidth()
-                    .background(if(selected == index) Color.Black.copy(alpha = .09f) else Color.Transparent,RoundedCornerShape(16.dp))
+                    .background(if(selected == index) colors.selection else Color.Transparent,RoundedCornerShape(16.dp))
                     .glassTap { if(!closing) { selected = index; close(action) } }
-                    .padding(horizontal = 12.dp, vertical = 15.dp), color = Color.Black, fontSize = 16.sp)
+                    .padding(horizontal = 12.dp, vertical = 15.dp), color = colors.text, fontSize = 16.sp)
             }
         } }
     }

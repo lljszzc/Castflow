@@ -24,6 +24,7 @@ import coil.compose.AsyncImage
 
 @Composable fun BottomDock(compact: Boolean, tab: String, current: PodcastItem?, playing: Boolean, loading: Boolean,
     onTab: (String) -> Unit, onExpand: () -> Unit, onPlayer: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPlayerBounds: (androidx.compose.ui.geometry.Rect) -> Unit) {
+    val colors = CastflowTokens.colors
     val tabs = listOf("主页" to Icons.Rounded.Home, "新发现" to Icons.Rounded.Explore, "资料库" to Icons.Rounded.LibraryMusic, "搜索" to Icons.Rounded.Search)
     val motion by animateFloatAsState(if(compact) 1f else 0f,spring(dampingRatio = 1f,stiffness = 340f),label = "dockMorph")
     val p = motion.coerceIn(0f,1f)
@@ -40,32 +41,32 @@ import coil.compose.AsyncImage
             Row(Modifier.fillMaxSize().padding(horizontal = 11.dp),verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(current.artwork,null,Modifier.size(29.dp).clip(RoundedCornerShape(7.dp)))
                 Column(Modifier.weight(1f).padding(start = 9.dp)) {
-                    androidx.compose.material3.Text(current.title,color = Color.Black,fontSize = 13.sp,lineHeight = 16.sp,maxLines = 1,overflow = TextOverflow.Ellipsis)
-                    androidx.compose.material3.Text(current.author,color = Color.Gray,fontSize = 11.sp,lineHeight = 14.sp,maxLines = 1,overflow = TextOverflow.Ellipsis)
+                    androidx.compose.material3.Text(current.title,color = colors.text,fontSize = 13.sp,lineHeight = 16.sp,maxLines = 1,overflow = TextOverflow.Ellipsis)
+                    androidx.compose.material3.Text(current.author,color = colors.secondaryText,fontSize = 11.sp,lineHeight = 14.sp,maxLines = 1,overflow = TextOverflow.Ellipsis)
                 }
-                SoftIconButton(onToggle,Modifier.size(34.dp),enabled = !loading) { if(loading) PlaybackLoading(22.dp,Color.Black) else LocalizedIcon(if(playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,if(playing) "暂停" else "播放",Modifier.size(25.dp),tint = Color.Black) }
-                SoftIconButton(onNext,Modifier.size(32.dp)) { LocalizedIcon(Icons.Rounded.SkipNext,"下一集",Modifier.size(24.dp),tint = Color.Black) }
+                SoftIconButton(onToggle,Modifier.size(34.dp),enabled = !loading) { if(loading) PlaybackLoading(22.dp,colors.text) else LocalizedIcon(if(playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,if(playing) "暂停" else "播放",Modifier.size(25.dp),tint = colors.text) }
+                SoftIconButton(onNext,Modifier.size(32.dp)) { LocalizedIcon(Icons.Rounded.SkipNext,"下一集",Modifier.size(24.dp),tint = colors.text) }
             }
         }
         Glass(Modifier.offset(y = navY).width(navWidth).height(navHeight)) {
             Box(Modifier.fillMaxSize()) {
                 if(p < .65f) {
                     val cell = navWidth/4
-                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((cell * selected).roundToPx(), 0) }.padding(4.dp).width(cell-8.dp).fillMaxHeight().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }.clip(RoundedCornerShape(30.dp)).background(Color.Black.copy(alpha = .10f)))
+                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((cell * selected).roundToPx(), 0) }.padding(4.dp).width(cell-8.dp).fillMaxHeight().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }.clip(RoundedCornerShape(30.dp)).background(colors.selection))
                     Row(Modifier.fillMaxSize().graphicsLayer { alpha = (1f-p*2).coerceAtLeast(0f) }) {
                         tabs.forEach { (name,icon) -> Column(Modifier.weight(1f).fillMaxHeight().glassTap { onTab(name) },verticalArrangement = Arrangement.Center,horizontalAlignment = Alignment.CenterHorizontally) {
-                            val tint = if(activeTab == name) Color(0xFF008CFF) else Color.Black
+                            val tint = if(activeTab == name) colors.accent else colors.text
                             LocalizedIcon(icon,name,Modifier.size(23.dp),tint = tint)
                             LocalizedText(name,fontSize = 10.sp,lineHeight = 13.sp,color = tint)
                         } }
                     }
                 } else Box(Modifier.fillMaxSize().glassTap(onExpand),contentAlignment = Alignment.Center) {
-                    LocalizedIcon(tabs.firstOrNull { it.first == activeTab }?.second ?: Icons.Rounded.Home,"展开导航",Modifier.size(24.dp).graphicsLayer { alpha = ((p-.5f)*2).coerceIn(0f,1f) },tint = Color(0xFF008CFF))
+                    LocalizedIcon(tabs.firstOrNull { it.first == activeTab }?.second ?: Icons.Rounded.Home,"展开导航",Modifier.size(24.dp).graphicsLayer { alpha = ((p-.5f)*2).coerceIn(0f,1f) },tint = colors.accent)
                 }
             }
         }
         if(p > .05f) Glass(Modifier.offset(x = width-43.dp,y = navY).size(43.dp).graphicsLayer { alpha = p; scaleX = .85f+.15f*p; scaleY = scaleX }.glassTap { onTab("搜索") }) {
-            Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) { LocalizedIcon(Icons.Rounded.Search,"搜索",Modifier.size(24.dp),tint = Color.Black) }
+            Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) { LocalizedIcon(Icons.Rounded.Search,"搜索",Modifier.size(24.dp),tint = colors.text) }
         }
     }
 }

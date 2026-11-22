@@ -27,11 +27,17 @@ import kotlinx.coroutines.launch
     var checking by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    val colors = CastflowTokens.colors
     BackHandler { if(web) web = false else onClose() }
     val glass = remember { HazeState() }
     CompositionLocalProvider(LocalGlassState provides glass) {
-    Surface(Modifier.fillMaxSize(),color = Color.White,contentColor = Color.Black) {
-        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFFE7F1FA),Color(0xFFF5F4FA),Color.White))).hazeSource(glass))
+    Surface(Modifier.fillMaxSize(),color = colors.background,contentColor = colors.text) {
+        val background = if (colors.isDark) {
+            listOf(colors.elevated, colors.muted, colors.background)
+        } else {
+            listOf(Color(0xFFE7F1FA), Color(0xFFF5F4FA), colors.background)
+        }
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(background)).hazeSource(glass))
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),verticalAlignment = Alignment.CenterVertically) {
                 SoftIconButton(onClick = { if(web) web = false else onClose() }) { LocalizedIcon(Icons.AutoMirrored.Rounded.ArrowBack,"返回") }
@@ -40,7 +46,7 @@ import kotlinx.coroutines.launch
             }
             if(web) {
                 if(progress < 100 || checking) LinearProgressIndicator(Modifier.fillMaxWidth())
-                error?.let { LocalizedText(it,Modifier.padding(16.dp),color = Color(0xFFBA2541)); SoftTextButton(onClick = { reload++; error = null }) { LocalizedText("重新载入") } }
+                error?.let { LocalizedText(it,Modifier.padding(16.dp),color = colors.error); SoftTextButton(onClick = { reload++; error = null }) { LocalizedText("重新载入") } }
                 key(reload) { AndroidView(factory = { context -> WebView(context).apply {
                     configureAppleLogin(settings)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this,true)
@@ -54,13 +60,13 @@ import kotlinx.coroutines.launch
             } else Box(Modifier.fillMaxSize().padding(24.dp),contentAlignment = Alignment.Center) {
                 Glass(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),horizontalAlignment = Alignment.CenterHorizontally,verticalArrangement = Arrangement.Center) {
-                Box(Modifier.size(84.dp).background(Color(0xFFE7F3FF),CircleShape),contentAlignment = Alignment.Center) { LocalizedIcon(Icons.Rounded.Podcasts,null,Modifier.size(44.dp),tint = Color(0xFF008CFF)) }
+                Box(Modifier.size(84.dp).background(colors.accentContainer,CircleShape),contentAlignment = Alignment.Center) { LocalizedIcon(Icons.Rounded.Podcasts,null,Modifier.size(44.dp),tint = colors.accent) }
                 LocalizedText(if(signedIn) "已连接 Apple 播客" else "连接你的播客资料库",Modifier.padding(top = 28.dp),fontSize = 27.sp,fontWeight = FontWeight.Bold)
-                LocalizedText(if(signedIn) "账户地区：${region.uppercase()}" else "登录后继续收听，查看关注的节目和已保存单集。",Modifier.padding(vertical = 16.dp),color = Color.Gray)
-                if(!signedIn) LocalizedText("接下来将在 Apple 官方页面完成登录。",color = Color.Gray,fontSize = 14.sp)
+                LocalizedText(if(signedIn) "账户地区：${region.uppercase()}" else "登录后继续收听，查看关注的节目和已保存单集。",Modifier.padding(vertical = 16.dp),color = colors.secondaryText)
+                if(!signedIn) LocalizedText("接下来将在 Apple 官方页面完成登录。",color = colors.secondaryText,fontSize = 14.sp)
                 Spacer(Modifier.height(24.dp))
                 SoftFilledButton(onClick = { web = true },Modifier.fillMaxWidth().height(52.dp)) { LocalizedText(if(signedIn) "管理 Apple 账户" else "继续登录",fontSize = 17.sp) }
-                if(signedIn) SoftTextButton(onClick = onSignOut,Modifier.padding(top = 14.dp)) { LocalizedText("退出登录",color = Color(0xFFBA2541)) }
+                if(signedIn) SoftTextButton(onClick = onSignOut,Modifier.padding(top = 14.dp)) { LocalizedText("退出登录",color = colors.error) }
                 SoftTextButton(onClick = onClose) { LocalizedText(if(signedIn) "返回收听" else "暂不登录") }
                 }
                 }

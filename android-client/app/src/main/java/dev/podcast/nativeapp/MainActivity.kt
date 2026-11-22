@@ -18,7 +18,9 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import dev.chrisbanes.haze.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,7 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -73,8 +77,64 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         acceptIntent(intent)
-        enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
-        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF008CFF), background = Color.White)) { CompositionLocalProvider(LocalGlassState provides remember { HazeState() }) { PodcastApp(playerRequest, shortcutDestination, shortcutRequest) } } }
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
+        setContent {
+            val context = LocalContext.current
+            val themePreferences = remember { ThemePreferences(context.applicationContext) }
+            var themeSelection by remember { mutableStateOf(themePreferences.read()) }
+            var renderedThemeSelection by remember { mutableStateOf(themeSelection) }
+            val systemIsDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val scope = rememberCoroutineScope()
+            val wipeProgress = remember { Animatable(1f) }
+            val wipeFade = remember { Animatable(1f) }
+            var wipeColor by remember { mutableStateOf<Color?>(null) }
+            var wipeAccent by remember { mutableStateOf<Color?>(null) }
+            var wipeIsDark by remember { mutableStateOf<Boolean?>(null) }
+            var wipeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            CastflowTheme(renderedThemeSelection) {
+                Box(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalGlassState provides remember { HazeState() }) {
+                        PodcastApp(
+                            playerRequest,
+                            shortcutDestination,
+                            shortcutRequest,
+                            themeSelection,
+                            onThemeSelection = { next ->
+                                if (next != themeSelection && wipeColor == null) {
+                                    val nextColors = themeColorsFor(next, systemIsDark)
+                                    wipeJob?.cancel()
+                                    wipeJob = scope.launch {
+                                        wipeProgress.snapTo(0f)
+                                        wipeFade.snapTo(1f)
+                                        wipeColor = nextColors.background
+                                        wipeAccent = nextColors.accent
+                                        wipeIsDark = nextColors.isDark
+                                        themeSelection = next
+                                        themePreferences.write(next)
+                                        wipeProgress.animateTo(1f, MotionTokens.themeWipe())
+                                        renderedThemeSelection = next
+                                        delay(32)
+                                        wipeFade.animateTo(0f, MotionTokens.themeWipeFade())
+                                        wipeColor = null
+                                        wipeAccent = null
+                                        wipeIsDark = null
+                                    }
+                                }
+                            },
+                            systemBarDarkOverride = wipeIsDark
+                        )
+                    }
+                    wipeColor?.let { incoming ->
+                        ThemeWipeOverlay(
+                            incomingColor = incoming,
+                            accentColor = wipeAccent ?: incoming,
+                            progress = wipeProgress.value,
+                            opacity = wipeFade.value
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 data class CachedPage(val rows: List<PodcastItem>, val shelves: List<EditorialSection>, val categories: List<BrowseCategory>, val warning: String, val cursors: List<String>, val time: Long = android.os.SystemClock.elapsedRealtime())
@@ -96,28 +156,20 @@ private object PageMemory {
 private fun sessionToken(): String? = CookieManager.getInstance().getCookie("https://podcasts.apple.com")?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("media-user-token=") }?.substringAfter('=')
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable internal fun PodcastApp(playerRequest: Int = 0, shortcutDestination: ShortcutDestination? = null, shortcutRequest: Int = 0) {
+@Composable internal fun PodcastApp(
+    playerRequest: Int = 0,
+    shortcutDestination: ShortcutDestination? = null,
+    shortcutRequest: Int = 0,
+    themeSelection: ThemeSelection = ThemeSelection(),
+    onThemeSelection: (ThemeSelection) -> Unit = {},
+    systemBarDarkOverride: Boolean? = null
+) {
     val context = LocalContext.current
+    val colors = CastflowTokens.colors
     val scope = rememberCoroutineScope()
     val api = remember { Api(::sessionToken) }
-    val listState = rememberLazyListState()
     var compact by remember { mutableStateOf(false) }
     val gestureThreshold = with(LocalDensity.current) { 18.dp.toPx() }
-    val scrollIntent = remember(listState,gestureThreshold) { object : NestedScrollConnection {
-        var travel = 0f
-        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-            if(source == NestedScrollSource.UserInput && abs(available.y) > .5f) {
-                if(sign(travel) != sign(available.y)) travel = 0f
-                travel += available.y
-                if(abs(travel) >= gestureThreshold) {
-                    if(travel < 0 && listState.canScrollForward) compact = true
-                    if(travel > 0) compact = false
-                    travel = 0f
-                }
-            }
-            return Offset.Zero
-        }
-    } }
     val downloads = remember { Downloads(context.applicationContext) }
     val progress = remember { ProgressStore(context.applicationContext) }
     var signedIn by remember { mutableStateOf(sessionToken() != null) }
@@ -128,6 +180,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     var menu by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<String?>(null) }
     var appSettings by remember { mutableStateOf(false) }
+    var themeSettings by remember { mutableStateOf(false) }
     var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var detail by remember { mutableStateOf<PodcastItem?>(null) }
     var episodeInfo by remember { mutableStateOf<PodcastItem?>(null) }
@@ -199,11 +252,48 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     var hasMore by remember { mutableStateOf(false) }
     BackHandler(enabled = (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) && !auth && !fullPlayer) { if(detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "排行榜") { tab = "新发现"; section = "概览" } else section = "概览" }
     val detailColors = rememberArtworkColors(detail?.artwork ?: "")
-    val bg by animateColorAsState(if (detail != null) detailColors.background else Color.White, label = "coverBackground")
-    val ink = if(bg.luminance() > .179f) Color.Black else Color.White
+    val usesArtworkPage = detail != null && !colors.isDark
+    val bg by animateColorAsState(if (usesArtworkPage) detailColors.background else colors.background, label = "coverBackground")
+    val ink = if (usesArtworkPage) detailColors.foreground else colors.text
+    val secondaryInk = if (usesArtworkPage) detailColors.secondary else colors.secondaryText
     val pageMotionKey = NavigationMotionKey(tab, section, browseCategory?.id, detail?.id)
-    val pageEntranceOffset = with(LocalDensity.current) { 10.dp.toPx() }
     var loadedPage by remember { mutableStateOf("") }
+    val pageRootKey = "${contentLanguage()}/$tab/$section/${detail?.id}/${browseCategory?.id}"
+    val pageKey = "$pageRootKey/$query"
+    val searchRoot = if (tab == "搜索" && detail == null && browseCategory == null) pageRootKey else null
+    val loadedContentMatches = canReusePageContent(loadedPage, pageKey, searchRoot)
+    val cachedForDisplay = remember(pageKey) { PageMemory.pages[pageKey] }
+    val pageContentReady = loadedContentMatches || cachedForDisplay != null
+    val pageRows = when {
+        loadedPage == pageKey -> rows
+        cachedForDisplay != null -> cachedForDisplay.rows
+        loadedContentMatches -> rows
+        else -> emptyList()
+    }
+    val pageShelves = when {
+        loadedPage == pageKey -> shelves
+        cachedForDisplay != null -> cachedForDisplay.shelves
+        loadedContentMatches -> shelves
+        else -> emptyList()
+    }
+    val pageCategories = when {
+        loadedPage == pageKey -> categories
+        cachedForDisplay != null -> cachedForDisplay.categories
+        loadedContentMatches -> categories
+        else -> emptyList()
+    }
+    val pageHomeWarning = when {
+        loadedPage == pageKey -> homeWarning
+        cachedForDisplay != null -> cachedForDisplay.warning
+        loadedContentMatches -> homeWarning
+        else -> ""
+    }
+    val pageHasMore = if (loadedPage == pageKey) hasMore else cachedForDisplay?.cursors?.isNotEmpty() == true
+    val pageLoading = !pageContentReady || (loadedPage == pageKey && loading)
+    val pageError = if (loadedPage == pageKey) error else null
+    val pageEntranceOffset = with(LocalDensity.current) {
+        if (detail != null || browseCategory != null) 6.dp.toPx() else 0f
+    }
     DisposableEffect(Unit) {
         val future = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
         var disposed = false
@@ -223,12 +313,8 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         error = null
         val cacheAccount = sessionToken()
         if(PageMemory.validate(cacheAccount)) loadedPage = ""
-        val pageKey = "${contentLanguage()}/$tab/$section/${detail?.id}/${browseCategory?.id}/$query"
         if (tab == "资料库" && section == "下载" && detail == null && browseCategory == null) {
             if (loadedPage != pageKey) {
-                if (loadedPage.isNotEmpty()) PageMemory.positions[loadedPage] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-                val saved = PageMemory.positions[pageKey]
-                listState.requestScrollToItem(saved?.first ?: 0, saved?.second ?: 0)
                 rows = emptyList()
                 compact = false
                 loadedPage = pageKey
@@ -257,9 +343,6 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         }
         val cached = PageMemory.pages[pageKey] ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { PageDiskCache(context).read(cacheAccount,pageKey) }?.also { PageMemory.pages[pageKey] = it }
         if(loadedPage != pageKey) {
-            if(loadedPage.isNotEmpty()) PageMemory.positions[loadedPage] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-            val savedPosition = PageMemory.positions[pageKey]
-            listState.requestScrollToItem(savedPosition?.first ?: 0,savedPosition?.second ?: 0)
             compact = detail != null
             rows = cached?.rows ?: emptyList(); shelves = cached?.shelves ?: emptyList()
             categories = cached?.categories ?: emptyList(); homeWarning = cached?.warning ?: ""
@@ -346,8 +429,9 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         else { val ep = if(item.audio.isBlank()) api.episode(item.id) else item; snackbar.showLocalizedSnackbar(if(downloads.enqueue(ep)) "已开始下载" else "已有下载记录") } }
         catch(e: Exception) { snackbar.showLocalizedSnackbar(e.message ?: "下载失败") }
     } }
-    val lightStatusIcons = auth || (!playerCoversBars && bg.luminance() > .179f)
-    val lightNavigationIcons = auth || !fullPlayer
+    val effectiveDarkForSystemBars = systemBarDarkOverride ?: colors.isDark
+    val lightStatusIcons = !effectiveDarkForSystemBars && (auth || (!playerCoversBars && bg.luminance() > .179f))
+    val lightNavigationIcons = !effectiveDarkForSystemBars && (auth || !fullPlayer)
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     SideEffect {
         val activity = context as? android.app.Activity
@@ -365,13 +449,35 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         key(pageMotionKey) {
         val pageMotion = remember { androidx.compose.animation.core.Animatable(0f) }
         LaunchedEffect(Unit) { pageMotion.animateTo(1f, MotionTokens.page()) }
+        val savedPosition = PageMemory.positions[pageKey]
+        val pageListState = rememberLazyListState(savedPosition?.first ?: 0, savedPosition?.second ?: 0)
+        val currentPageKey by rememberUpdatedState(pageKey)
+        DisposableEffect(pageListState, pageMotionKey) {
+            onDispose {
+                PageMemory.positions[currentPageKey] =
+                    pageListState.firstVisibleItemIndex to pageListState.firstVisibleItemScrollOffset
+            }
+        }
+        val scrollIntent = remember(pageListState, gestureThreshold) { object : NestedScrollConnection {
+            var travel = 0f
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if(source == NestedScrollSource.UserInput && abs(available.y) > .5f) {
+                    if(sign(travel) != sign(available.y)) travel = 0f
+                    travel += available.y
+                    if(abs(travel) >= gestureThreshold) {
+                        if(travel < 0 && pageListState.canScrollForward) compact = true
+                        if(travel > 0) compact = false
+                        travel = 0f
+                    }
+                }
+                return Offset.Zero
+            }
+        } }
         LazyColumn(Modifier.fillMaxSize().graphicsLayer {
             val progress = pageMotion.value
-            alpha = .72f + .28f * progress
+            alpha = .86f + .14f * progress
             translationY = (1f - progress) * pageEntranceOffset
-            scaleX = .994f + .006f * progress
-            scaleY = scaleX
-        }.hazeSource(LocalGlassState.current).background(bg).nestedScroll(scrollIntent), state = listState, contentPadding = PaddingValues(start = 22.dp, top = statusBarTop, end = 22.dp, bottom = (padding.calculateBottomPadding() + 92.dp).coerceAtLeast(200.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        }.hazeSource(LocalGlassState.current).background(bg).nestedScroll(scrollIntent), state = pageListState, contentPadding = PaddingValues(start = 22.dp, top = statusBarTop, end = 22.dp, bottom = (padding.calculateBottomPadding() + 92.dp).coerceAtLeast(200.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item { Row(Modifier.fillMaxWidth().padding(top = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (browseCategory != null || detail != null || tab == "排行榜" || (tab == "资料库" && section != "概览")) SoftIconButton(onClick = { if (detail != null) detail = null else if(browseCategory != null) browseCategory = null else if(tab == "资料库") section = "概览" else { tab = "新发现"; section = "概览" } }) { LocalizedIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
                 LocalizedText(if(detail != null) "" else browseCategory?.title ?: tab, Modifier.weight(1f), fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2)
@@ -386,40 +492,40 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
             if (detail != null) item { val show = detail ?: return@item; Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 AsyncImage(show.artwork, show.title, Modifier.fillMaxWidth(.72f).aspectRatio(1f).clip(RoundedCornerShape(18.dp)))
                 androidx.compose.material3.Text(show.title, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                androidx.compose.material3.Text(show.author, fontSize = 20.sp, color = detailColors.secondary)
+                androidx.compose.material3.Text(show.author, fontSize = 20.sp, color = secondaryInk)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SoftIconButton(onClick = { libraryPreferences.togglePin(show); layoutRevision++ }) { LocalizedIcon(if(libraryPreferences.pins().any { it.id == show.id }) Icons.Rounded.PushPin else Icons.Rounded.Add, "置顶") }
-                    SoftFilledButton(onClick = { rows.firstOrNull()?.let { play(it, queueItems = rows) } }, enabled = rows.isNotEmpty() && rows.first().type == "podcast-episodes", modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
+                    SoftFilledButton(onClick = { pageRows.firstOrNull()?.let { play(it, queueItems = pageRows) } }, enabled = pageRows.isNotEmpty() && pageRows.first().type == "podcast-episodes", modifier = Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = ink, contentColor = bg)) { LocalizedIcon(Icons.Rounded.PlayArrow, null); LocalizedText("播放最新单集", fontSize = 17.sp) }
                     SoftIconButton(onClick = { update(show, true) }) { LocalizedIcon(Icons.Rounded.AddCircleOutline, "关注节目") }
                 }
                 var expanded by remember(show.id) { mutableStateOf(false) }
-                androidx.compose.material3.Text(remember(show.description) { android.text.Html.fromHtml(show.description, 0).toString() }, color = detailColors.secondary, maxLines = if(expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().glassTap { expanded = !expanded })
+                androidx.compose.material3.Text(remember(show.description) { android.text.Html.fromHtml(show.description, 0).toString() }, color = secondaryInk, maxLines = if(expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().glassTap { expanded = !expanded })
                 Row { SoftTextButton(onClick = { update(show, false) }) { LocalizedText("取消关注", color = ink) }; SoftTextButton(onClick = { expanded = !expanded }) { LocalizedText(if(expanded) "收起简介" else "更多", color = ink) } }
                 LocalizedText("单集", Modifier.align(Alignment.Start), fontSize = 24.sp, fontWeight = FontWeight.Bold)
             } }
-            if (tab == "搜索" && detail == null && browseCategory == null) item { OutlinedTextField(query, { query = it; browseCategory = null }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = Color(0xFFF0F1F4), unfocusedContainerColor = Color(0xFFF0F1F4)), placeholder = { LocalizedText("节目、单集与创作者") }, leadingIcon = { LocalizedIcon(Icons.Rounded.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
+            if (tab == "搜索" && detail == null && browseCategory == null) item { OutlinedTextField(query, { query = it; browseCategory = null }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = colors.muted, unfocusedContainerColor = colors.muted, focusedTextColor = colors.text, unfocusedTextColor = colors.text, cursorColor = colors.accent, focusedPlaceholderColor = colors.secondaryText, unfocusedPlaceholderColor = colors.secondaryText, focusedLeadingIconColor = colors.secondaryText, unfocusedLeadingIconColor = colors.secondaryText), placeholder = { LocalizedText("节目、单集与创作者") }, leadingIcon = { LocalizedIcon(Icons.Rounded.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
             if (tab == "排行榜" && detail == null) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("节目", "单集", "订阅节目").forEach { label -> SoftTextButton(onClick = { section = label }, modifier = Modifier.background(if(section == label) Color(0xFFE7F3FF) else Color.Transparent,RoundedCornerShape(22.dp))) { LocalizedText(label,fontWeight = if(section == label) FontWeight.SemiBold else FontWeight.Normal) } }
+                listOf("节目", "单集", "订阅节目").forEach { label -> SoftTextButton(onClick = { section = label }, modifier = Modifier.background(if(section == label) colors.accentContainer else Color.Transparent,RoundedCornerShape(22.dp))) { LocalizedText(label,fontWeight = if(section == label) FontWeight.SemiBold else FontWeight.Normal) } }
             } }
-            if(tab == "主页" && detail == null && homeWarning.isNotBlank()) item { LocalizedText("暂未载入：$homeWarning",color = Color.Gray,fontSize = 13.sp); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } }
-            if (tab == "新发现" && detail == null && shelves.isEmpty()) item { LocalizedText("编辑精选", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
-            if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            error?.let { message -> item { LocalizedText(message, color = MaterialTheme.colorScheme.error); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } } }
-            if (!loading && rows.isEmpty() && shelves.isEmpty() && error == null && !(tab == "搜索" && query.isBlank() && categories.isNotEmpty())) item { Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                LocalizedIcon(Icons.Rounded.Headphones, null, Modifier.size(54.dp), tint = Color.Gray)
+            if(tab == "主页" && detail == null && pageHomeWarning.isNotBlank()) item { LocalizedText("暂未载入：$pageHomeWarning",color = colors.secondaryText,fontSize = 13.sp); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } }
+            if (tab == "新发现" && detail == null && pageShelves.isEmpty()) item { LocalizedText("编辑精选", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+            if (pageLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            pageError?.let { message -> item { LocalizedText(message, color = MaterialTheme.colorScheme.error); SoftTextButton(onClick = { refresh++ }) { LocalizedText("重试") } } }
+            if (!pageLoading && pageRows.isEmpty() && pageShelves.isEmpty() && pageError == null && !(tab == "搜索" && query.isBlank() && pageCategories.isNotEmpty())) item { Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                LocalizedIcon(Icons.Rounded.Headphones, null, Modifier.size(54.dp), tint = colors.secondaryText)
                 LocalizedText(when { tab == "资料库" && section != "下载" && !signedIn -> "登录后查看你的 Apple 播客资料库"; tab == "搜索" -> "搜索你感兴趣的声音"; else -> "这里暂时没有内容" }, Modifier.padding(top = 16.dp))
                 if (!signedIn && tab == "资料库" && section != "下载") SoftFilledButton(onClick = { auth = true }) { LocalizedText("登录") }
             } }
             if(tab == "搜索" && query.isBlank() && browseCategory == null && detail == null) {
                 item { LocalizedText("浏览分类",fontSize = 24.sp,fontWeight = FontWeight.Bold) }
-                items(categories.chunked(2)) { group -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(pageCategories.chunked(2)) { group -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     group.forEach { category -> Box(Modifier.weight(1f).height(90.dp).clip(RoundedCornerShape(16.dp)).background(Color(category.color)).glassTap { browseCategory = category }) {
                         AsyncImage(category.artwork,null,Modifier.fillMaxHeight().fillMaxWidth(.5f).align(Alignment.CenterEnd),contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                         LocalizedText(category.title,Modifier.align(Alignment.BottomStart).fillMaxWidth(.7f).padding(12.dp),fontWeight = FontWeight.Bold,fontSize = 17.sp,color = Color.White,maxLines = 2)
                     } }; if(group.size == 1) Spacer(Modifier.weight(1f))
                 } }
-            } else if((tab == "主页" || tab == "新发现") && detail == null && shelves.isNotEmpty()) {
-                items(shelves, key = { it.id }) { shelf -> Column(Modifier.animateItem(fadeInSpec = tween(180),fadeOutSpec = tween(120),placementSpec = tween(220)),verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            } else if((tab == "主页" || tab == "新发现") && detail == null && pageShelves.isNotEmpty()) {
+                items(pageShelves, key = { it.id }) { shelf -> Column(Modifier.animateItem(fadeInSpec = tween(180),fadeOutSpec = tween(120),placementSpec = tween(220)),verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val chart = DiscoveryChart.entries.firstOrNull { it.shelfId == shelf.id }
                     if (chart == null) {
                         LocalizedText(shelf.title, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -434,18 +540,18 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                         items(shelf.items, key = { it.id }) { entry -> Column(Modifier.width(155.dp).glassTap { if(entry.type == "podcasts") detail = entry else episodeInfo = entry }) {
                             AsyncImage(entry.artwork,entry.title,Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)))
                             androidx.compose.material3.Text(entry.title,Modifier.padding(top = 8.dp), maxLines = 2,overflow = TextOverflow.Ellipsis)
-                            androidx.compose.material3.Text(entry.author,maxLines = 1,overflow = TextOverflow.Ellipsis,color = Color.Gray,fontSize = 13.sp)
+                            androidx.compose.material3.Text(entry.author,maxLines = 1,overflow = TextOverflow.Ellipsis,color = colors.secondaryText,fontSize = 13.sp)
                         } }
                     }
                 } }
             } else if(tab == "资料库" && section == "概览" && detail == null) {
                 item { LibraryHubHeader(libraryPreferences, layoutRevision, { section = it }, { detail = it }) }
-                items(rows.chunked(2)) { group -> LibraryGridRow(group) { detail = it } }
-            } else items(rows, key = { it.type + it.id }, contentType = { it.type }) { item ->
+                items(pageRows.chunked(2)) { group -> LibraryGridRow(group) { detail = it } }
+            } else items(pageRows, key = { it.type + it.id }, contentType = { it.type }) { item ->
                 Column(Modifier.animateItem(fadeInSpec = tween(180),fadeOutSpec = tween(120),placementSpec = tween(240))) { Row(Modifier.fillMaxWidth().glassTap { if (item.type == "podcasts") detail = item else episodeInfo = item }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Artwork(item, 70)
-                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { androidx.compose.material3.Text(item.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis); androidx.compose.material3.Text(item.author, fontSize = 13.sp, color = if(detail != null) detailColors.secondary else Color.Gray, maxLines = 1) }
-                    if (item.type != "podcasts") SoftIconButton(onClick = { play(item, queueItems = if(detail != null) rows else emptyList()) }) { LocalizedIcon(Icons.Rounded.PlayCircle, "播放", tint = if(detail != null) ink else MaterialTheme.colorScheme.primary) }
+                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) { androidx.compose.material3.Text(item.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis); androidx.compose.material3.Text(item.author, fontSize = 13.sp, color = secondaryInk, maxLines = 1) }
+                    if (item.type != "podcasts") SoftIconButton(onClick = { play(item, queueItems = if(detail != null) pageRows else emptyList()) }) { LocalizedIcon(Icons.Rounded.PlayCircle, "播放", tint = if(detail != null) ink else MaterialTheme.colorScheme.primary) }
                     if(item.type != "podcasts") Box {
                         var actions by remember(item.id) { mutableStateOf(false) }
                         SoftIconButton(onClick = { actions = true }) { LocalizedIcon(Icons.Rounded.MoreVert, "单集操作", tint = ink) }
@@ -456,12 +562,12 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
                         ), { actions = false })
                     }
                 }
-                if(tab == "资料库" && section == "下载") downloadEntries[item.id]?.let { entry -> LocalizedText(entry.status, color = Color.Gray, fontSize = 13.sp)
+                if(tab == "资料库" && section == "下载") downloadEntries[item.id]?.let { entry -> LocalizedText(entry.status, color = colors.secondaryText, fontSize = 13.sp)
                     if(entry.retryable) SoftTextButton(onClick = { runCatching { downloads.retry(item) }.onFailure { scope.launch { snackbar.showLocalizedSnackbar("无法重试，请删除后重新下载") } }; refresh++ }) { LocalizedText("重试下载") }
                 }
-                HorizontalDivider(color = Color.Black.copy(alpha = .05f)) }
+                HorizontalDivider(color = colors.divider) }
             }
-            if (hasMore) item { SoftTextButton(enabled = !loading, onClick = { if (paginationJob?.isActive != true) paginationJob = scope.launch {
+            if (pageHasMore) item { SoftTextButton(enabled = !pageLoading, onClick = { if (paginationJob?.isActive != true) paginationJob = scope.launch {
                 loading = true
                 try { rows = (rows + api.more()).distinctBy { it.type + it.id }; hasMore = api.next != null; PageMemory.pages[loadedPage] = CachedPage(rows,shelves,categories,homeWarning,api.paginationSnapshot()) }
                 catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; snackbar.showLocalizedSnackbar(e.message ?: "加载下一页失败") }
@@ -470,7 +576,7 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         }
         }
     }
-    episodeInfo?.let { item -> EpisodeDetails(item, api, { episodeInfo = null }, { play(it, queueItems = if(detail != null) rows else emptyList()) }, { update(it,true) }, { play(it,true) }, { downloadItem(it) }, { ep, complete ->
+    episodeInfo?.let { item -> EpisodeDetails(item, api, { episodeInfo = null }, { play(it, queueItems = if(detail != null) pageRows else emptyList()) }, { update(it,true) }, { play(it,true) }, { downloadItem(it) }, { ep, complete ->
         if(!signedIn) auth = true else scope.launch {
             try { api.savePosition(ep.id, if(complete) ep.duration.coerceAtLeast(0) else 0, complete, java.time.Instant.now().toString()); snackbar.showLocalizedSnackbar("播放状态已更新"); refresh++ }
             catch(e: Exception) { snackbar.showLocalizedSnackbar(e.message ?: "更新失败") }
@@ -478,6 +584,23 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     }) }
     editor?.let { action -> LibraryEditor(libraryPreferences, action == "编辑置顶项", { editor = null }) { layoutRevision++; editor = null } }
     if(appSettings) SoftDialog(onDismissRequest = { appSettings = false }, title = { LocalizedText("设置") }) { closeWith -> Column {
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).glassTap {
+            closeWith {
+                appSettings = false
+                themeSettings = true
+            }
+        }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            LocalizedText("主题", Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            LocalizedText(
+                themeSummary(themeSelection),
+                Modifier.weight(1f).padding(start = 8.dp),
+                color = colors.secondaryText,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                maxLines = 2
+            )
+            LocalizedIcon(Icons.Rounded.ChevronRight, null, tint = colors.secondaryText)
+        }
         LocalizedText("账户地区：${api.storefront.uppercase()}")
         var wifiOnly by remember { mutableStateOf(libraryPreferences.prefs.getBoolean("wifiOnly",true)) }
         Row(verticalAlignment = Alignment.CenterVertically) { LocalizedText("仅 Wi-Fi 下载", Modifier.weight(1f)); Switch(wifiOnly, { wifiOnly = it; libraryPreferences.prefs.edit { putBoolean("wifiOnly",it) } }) }
@@ -488,6 +611,11 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
         SoftTextButton(onClick = { closeWith { appSettings = false; tab = "资料库"; section = "下载" } }) { LocalizedText("管理下载") }
         SoftTextButton(onClick = { closeWith { appSettings = false; auth = true } }) { LocalizedText("管理账户") }
     } }
+    if (themeSettings) ThemeSettingsDialog(
+        selection = themeSelection,
+        onSelection = onThemeSelection,
+        onDismiss = { themeSettings = false }
+    )
     AnimatedVisibility(auth,enter = fadeIn(tween(180)) + slideInVertically(tween(260,easing = MotionTokens.enter)) { it/12 },exit = fadeOut(tween(140)) + slideOutVertically(tween(180)) { it/12 }) { AccountScreen(signedIn,api.storefront,api,::sessionToken, { auth = false }, { signedIn = true; auth = false; refresh++ }, {
         CookieManager.getInstance().removeAllCookies {
             CookieManager.getInstance().flush()
@@ -518,11 +646,166 @@ private fun sessionToken(): String? = CookieManager.getInstance().getCookie("htt
     }
     }
 }
-@Composable private fun Artwork(item: PodcastItem, size: Int) { AsyncImage(item.artwork, item.title, Modifier.size(size.dp).clip(RoundedCornerShape(14.dp)).background(Color.LightGray)) }
+@Composable private fun ThemeWipeOverlay(
+    incomingColor: Color,
+    accentColor: Color,
+    progress: Float,
+    opacity: Float
+) {
+    Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = opacity }) {
+        val extent = size.width + size.height
+        val cut = progress.coerceIn(0f, 1f) * extent
+        val veil = Brush.linearGradient(
+            colors = listOf(
+                incomingColor,
+                androidx.compose.ui.graphics.lerp(incomingColor, accentColor, .18f),
+                incomingColor
+            ),
+            start = Offset.Zero,
+            end = Offset(size.width, size.height)
+        )
+        if (cut <= 0f) return@Canvas
+        if (cut >= extent) {
+            drawRect(veil)
+            return@Canvas
+        }
+
+        val boundaryStart: Offset
+        val boundaryEnd: Offset
+        val path = Path()
+        when {
+            cut <= size.width -> {
+                boundaryStart = Offset(cut, 0f)
+                boundaryEnd = Offset(0f, cut)
+                path.moveTo(0f, 0f)
+                path.lineTo(boundaryStart.x, boundaryStart.y)
+                path.lineTo(boundaryEnd.x, boundaryEnd.y)
+            }
+            cut <= size.height -> {
+                boundaryStart = Offset(size.width, cut - size.width)
+                boundaryEnd = Offset(0f, cut)
+                path.moveTo(0f, 0f)
+                path.lineTo(size.width, 0f)
+                path.lineTo(boundaryStart.x, boundaryStart.y)
+                path.lineTo(boundaryEnd.x, boundaryEnd.y)
+            }
+            else -> {
+                boundaryStart = Offset(size.width, cut - size.width)
+                boundaryEnd = Offset(cut - size.height, size.height)
+                path.moveTo(0f, 0f)
+                path.lineTo(size.width, 0f)
+                path.lineTo(boundaryStart.x, boundaryStart.y)
+                path.lineTo(boundaryEnd.x, boundaryEnd.y)
+                path.lineTo(0f, size.height)
+            }
+        }
+        path.close()
+        drawPath(path, veil)
+        drawLine(
+            color = if (incomingColor.luminance() > .5f) {
+                Color.Black.copy(alpha = .14f)
+            } else {
+                Color.White.copy(alpha = .30f)
+            },
+            start = boundaryStart,
+            end = boundaryEnd,
+            strokeWidth = 1.dp.toPx()
+        )
+    }
+}
+@Composable private fun themeSummary(selection: ThemeSelection): String {
+    val darkStyle = localizedString(
+        if (selection.darkTheme == DarkTheme.OledBlack) "OLED 纯黑" else "深灰色"
+    )
+    return when (selection.mode) {
+        ThemeMode.FollowSystem -> "${localizedString("跟随系统")} · $darkStyle"
+        ThemeMode.Light -> localizedString("浅色")
+        ThemeMode.Dark -> "${localizedString("深色")} · $darkStyle"
+    }
+}
+
+@Composable private fun ThemeSettingsDialog(
+    selection: ThemeSelection,
+    onSelection: (ThemeSelection) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = CastflowTokens.colors
+    SoftDialog(onDismissRequest = onDismiss, title = { LocalizedText("主题") }) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ThemeChoice(
+                title = "跟随系统",
+                subtitle = "使用设备的外观设置",
+                selected = selection.mode == ThemeMode.FollowSystem,
+                onClick = { onSelection(selection.copy(mode = ThemeMode.FollowSystem)) }
+            )
+            ThemeChoice(
+                title = "浅色",
+                subtitle = "保持当前明亮界面",
+                selected = selection.mode == ThemeMode.Light,
+                onClick = { onSelection(selection.copy(mode = ThemeMode.Light)) }
+            )
+            ThemeChoice(
+                title = "深色",
+                subtitle = "手动使用深色界面",
+                selected = selection.mode == ThemeMode.Dark,
+                onClick = { onSelection(selection.copy(mode = ThemeMode.Dark)) }
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = colors.divider)
+            LocalizedText("深色外观", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            ThemeChoice(
+                title = "深灰色",
+                subtitle = "柔和的深灰色背景",
+                selected = selection.darkTheme == DarkTheme.DarkGray,
+                onClick = { onSelection(selection.copy(darkTheme = DarkTheme.DarkGray)) }
+            )
+            ThemeChoice(
+                title = "OLED 纯黑",
+                subtitle = "纯黑背景，适合 OLED 屏幕",
+                selected = selection.darkTheme == DarkTheme.OledBlack,
+                onClick = { onSelection(selection.copy(darkTheme = DarkTheme.OledBlack)) }
+            )
+        }
+    }
+}
+
+@Composable private fun ThemeChoice(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = CastflowTokens.colors
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) colors.choiceSelected else Color.Transparent)
+            .border(
+                1.dp,
+                if (selected) colors.choiceBorder else Color.Transparent,
+                RoundedCornerShape(16.dp)
+            )
+            .glassTap(onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(Modifier.weight(1f).padding(start = 4.dp)) {
+            LocalizedText(title, fontSize = 16.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            LocalizedText(subtitle, color = colors.secondaryText, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable private fun Artwork(item: PodcastItem, size: Int) {
+    val colors = CastflowTokens.colors
+    AsyncImage(item.artwork, item.title, Modifier.size(size.dp).clip(RoundedCornerShape(14.dp)).background(colors.placeholder))
+}
 @OptIn(ExperimentalHazeApi::class)
 @Composable internal fun Glass(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    val style = HazeDefaults.style(backgroundColor = Color.White, tint = HazeTint(Color.White.copy(alpha = .48f)), blurRadius = 25.dp, noiseFactor = 0f)
-    Box(modifier.shadow(8.dp,RoundedCornerShape(32.dp),clip = false,ambientColor = Color.Black.copy(alpha = .08f),spotColor = Color.Black.copy(alpha = .10f)).clip(RoundedCornerShape(32.dp)).hazeEffect(LocalGlassState.current, style) { inputScale = HazeInputScale.Fixed(.8f) }.background(Color.White.copy(alpha = .04f)).then(Modifier), contentAlignment = Alignment.Center) {
-        Surface(color = Color.Transparent, shape = RoundedCornerShape(32.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .7f))) { content() }
+    val colors = CastflowTokens.colors
+    val style = HazeDefaults.style(backgroundColor = colors.glassBackground, tint = HazeTint(colors.glassTint), blurRadius = 25.dp, noiseFactor = 0f)
+    val spotShadow = if (colors.isDark) Color.Black.copy(alpha = .65f) else Color.Black.copy(alpha = .10f)
+    Box(modifier.shadow(8.dp,RoundedCornerShape(32.dp),clip = false,ambientColor = colors.shadow,spotColor = spotShadow).clip(RoundedCornerShape(32.dp)).hazeEffect(LocalGlassState.current, style) { inputScale = HazeInputScale.Fixed(.8f) }.background(colors.glassOverlay).then(Modifier), contentAlignment = Alignment.Center) {
+        Surface(color = Color.Transparent, shape = RoundedCornerShape(32.dp), border = androidx.compose.foundation.BorderStroke(1.dp, colors.glassBorder)) { content() }
     }
 }
